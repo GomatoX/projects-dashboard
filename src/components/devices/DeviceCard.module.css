@@ -1,0 +1,27 @@
+.card {
+  background: var(--mantine-color-dark-7) !important;
+  border: 1px solid var(--mantine-color-dark-5) !important;
+  transition: all var(--transition-smooth);
+}
+
+.card:hover {
+  border-color: var(--mantine-color-dark-3) !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+}
+
+.icon {
+  transition: transform var(--transition-smooth);
+}
+
+.card:hover .icon {
+  transform: scale(1.05);
+}
+
+.deleteBtn {
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.card:hover .deleteBtn {
+  opacity: 1;
+}

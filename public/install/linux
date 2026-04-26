@@ -1,0 +1,104 @@
+#!/bin/bash
+set -e
+
+INSTALL_DIR="$HOME/.dev-dashboard-agent"
+DASHBOARD_URL="${1}"
+AGENT_TOKEN="${2}"
+
+if [ -z "$AGENT_TOKEN" ] || [ -z "$DASHBOARD_URL" ]; then
+  echo "Usage: curl -fsSL <dashboard>/install/linux | bash -s -- <dashboard_url> <agent_token>"
+  echo ""
+  echo "Get token: Dashboard → Devices → Add Device"
+  exit 1
+fi
+
+echo "🔧 Dev Dashboard Agent Installer (Linux)"
+echo "──────────────────────────────────────────"
+echo "Dashboard: $DASHBOARD_URL"
+echo "Install:   $INSTALL_DIR"
+echo ""
+
+# Dependencies check
+command -v node >/dev/null 2>&1 || { echo "❌ Node.js 22+ required. Install: https://nodejs.org"; exit 1; }
+NODE_VERSION=$(node -v | cut -d'v' -f2 | cut -d'.' -f1)
+if [ "$NODE_VERSION" -lt 20 ]; then
+  echo "❌ Node.js 20+ required (found v$NODE_VERSION)"
+  exit 1
+fi
+echo "✓ Node.js $(node -v)"
+
+command -v pnpm >/dev/null 2>&1 || {
+  echo "📦 Installing pnpm..."
+  npm install -g pnpm
+}
+
+# Clone / update agent
+if [ -d "$INSTALL_DIR" ]; then
+  echo "📂 Updating existing agent..."
+  cd "$INSTALL_DIR"
+  git pull --rebase 2>/dev/null || true
+else
+  echo "📥 Downloading agent..."
+  # For now, copy from dashboard if accessible, otherwise clone
+  if [ -d "/opt/dev-dashboard-agent" ]; then
+    cp -r /opt/dev-dashboard-agent "$INSTALL_DIR"
+  else
+    mkdir -p "$INSTALL_DIR"
+    # Download agent files from dashboard
+    curl -fsSL "$DASHBOARD_URL/api/agent/download" -o /tmp/agent.tar.gz 2>/dev/null && \
+      tar -xzf /tmp/agent.tar.gz -C "$INSTALL_DIR" && \
+      rm /tmp/agent.tar.gz || {
+        echo "⚠ Could not download agent package."
+        echo "Copy the agent/ directory manually to $INSTALL_DIR"
+        exit 1
+      }
+  fi
+fi
+
+cd "$INSTALL_DIR"
+pnpm install --frozen-lockfile 2>/dev/null || pnpm install
+
+# Config
+cat > "$INSTALL_DIR/.env" <<EOF
+DASHBOARD_URL=$DASHBOARD_URL
+AGENT_TOKEN=$AGENT_TOKEN
+AGENT_NAME=$(hostname)
+AGENT_PORT=3939
+PROJECT_PATHS=$HOME/projects
+EOF
+
+echo "✓ Configuration saved"
+
+# Systemd service
+sudo tee /etc/systemd/system/dev-dashboard-agent.service > /dev/null <<EOF
+[Unit]
+Description=Dev Dashboard Agent
+After=network.target
+
+[Service]
+Type=simple
+User=$USER
+WorkingDirectory=$INSTALL_DIR
+ExecStart=$(which node) --import tsx src/index.ts
+Restart=always
+RestartSec=5
+StandardOutput=append:$INSTALL_DIR/agent.log
+StandardError=append:$INSTALL_DIR/agent.error.log
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable dev-dashboard-agent
+sudo systemctl start dev-dashboard-agent
+
+echo ""
+echo "──────────────────────────────────────────"
+echo "✅ Agent installed and running!"
+echo ""
+echo "Status:    sudo systemctl status dev-dashboard-agent"
+echo "Logs:      tail -f $INSTALL_DIR/agent.log"
+echo "Stop:      sudo systemctl stop dev-dashboard-agent"
+echo "Uninstall: bash $INSTALL_DIR/uninstall.sh"

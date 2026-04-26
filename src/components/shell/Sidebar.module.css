@@ -1,0 +1,16 @@
+.navLink {
+  transition: all var(--transition-fast);
+}
+
+.navLink:hover {
+  background-color: var(--mantine-color-dark-6);
+}
+
+.statusFooter {
+  opacity: 0.8;
+  transition: opacity var(--transition-fast);
+}
+
+.statusFooter:hover {
+  opacity: 1;
+}

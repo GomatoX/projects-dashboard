@@ -1,0 +1,33 @@
+.card {
+  background: var(--mantine-color-dark-7) !important;
+  border: 1px solid var(--mantine-color-dark-5) !important;
+  transition: all var(--transition-smooth);
+  cursor: pointer;
+  text-decoration: none;
+  color: inherit;
+}
+
+.card:hover {
+  border-color: var(--mantine-color-brand-7) !important;
+  transform: translateY(-2px);
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.3),
+    0 0 0 1px rgba(13, 197, 217, 0.1);
+}
+
+.icon {
+  transition: transform var(--transition-smooth);
+}
+
+.card:hover .icon {
+  transform: scale(1.1);
+}
+
+.deleteBtn {
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.card:hover .deleteBtn {
+  opacity: 1;
+}
