@@ -60,7 +60,32 @@ export type AgentCommand =
       projectPath: string;
       action: 'save' | 'pop' | 'apply' | 'drop';
       message?: string;
-    };
+    }
+  | {
+      type: 'RUN_COMMAND';
+      id: string;
+      projectPath: string;
+      command: string;
+    }
+
+  // Terminal operations
+  | {
+      type: 'TERMINAL_SPAWN';
+      id: string;
+      sessionId: string;
+      cwd: string;
+      cols: number;
+      rows: number;
+    }
+  | { type: 'TERMINAL_INPUT'; id: string; sessionId: string; data: string }
+  | {
+      type: 'TERMINAL_RESIZE';
+      id: string;
+      sessionId: string;
+      cols: number;
+      rows: number;
+    }
+  | { type: 'TERMINAL_KILL'; id: string; sessionId: string };
 
 // ─── Agent → Dashboard Events ─────────────────────────────
 export type AgentEvent =
@@ -108,7 +133,13 @@ export type AgentEvent =
       action: string;
       success: boolean;
       message?: string;
-    };
+    }
+  | { type: 'COMMAND_RESULT'; requestId: string; output: string }
+
+  // Terminal events
+  | { type: 'TERMINAL_SPAWNED'; requestId: string; sessionId: string }
+  | { type: 'TERMINAL_OUTPUT'; sessionId: string; data: string }
+  | { type: 'TERMINAL_EXIT'; sessionId: string; exitCode: number };
 
 // ─── Response wrapper (for command → response flow) ───────
 export interface CommandResponse<T = unknown> {

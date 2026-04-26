@@ -2,10 +2,10 @@
 
 /* ─── CSS Custom Properties ─────────────────────────────── */
 :root {
-  --glass-bg: rgba(26, 26, 46, 0.6);
-  --glass-border: rgba(255, 255, 255, 0.08);
-  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-  --glow-brand: 0 0 20px rgba(13, 197, 217, 0.15);
+  --glass-bg: rgba(29, 30, 48, 0.7);
+  --glass-border: rgba(255, 255, 255, 0.12);
+  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  --glow-brand: 0 0 20px rgba(13, 197, 217, 0.2);
   --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
   --transition-smooth: 300ms cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -29,6 +29,20 @@ body {
   background-color: var(--mantine-color-dark-9);
   color: var(--mantine-color-dark-0);
   min-height: 100vh;
+}
+
+/* ─── Inline Code ──────────────────────────────────────── */
+code {
+  background-color: var(--mantine-color-dark-6);
+  color: var(--mantine-color-brand-3);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.875em;
+}
+
+/* ─── Override Mantine dimmed to be brighter ────────────── */
+.mantine-Text-root[data-c='dimmed'] {
+  color: var(--mantine-color-dark-1) !important;
 }
 
 /* ─── Selection ─────────────────────────────────────────── */
@@ -144,4 +158,81 @@ body {
 
 .animate-slide-in {
   animation: slide-in-right var(--transition-smooth) ease-out;
+}
+
+/* ─── PR Card Hover ─────────────────────────────────────── */
+.pr-card-hover:hover {
+  border-color: var(--mantine-color-dark-3) !important;
+  background-color: var(--mantine-color-dark-6) !important;
+}
+
+/* ─── Mobile Responsive ─────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Touch-friendly targets */
+  button,
+  a,
+  [role='tab'] {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* Horizontal scrollable tabs */
+  [role='tablist'] {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    flex-wrap: nowrap !important;
+    gap: 4px !important;
+    padding-bottom: 4px;
+  }
+
+  [role='tablist']::-webkit-scrollbar {
+    display: none;
+  }
+
+  [role='tab'] {
+    white-space: nowrap;
+    flex-shrink: 0;
+    font-size: 12px !important;
+    padding: 6px 10px !important;
+  }
+
+  /* Compact cards */
+  .mantine-Card-root {
+    padding: 12px !important;
+  }
+
+  /* Safe area insets for notched devices */
+  .mantine-AppShell-main {
+    padding-left: max(env(safe-area-inset-left), 12px);
+    padding-right: max(env(safe-area-inset-right), 12px);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* Stack PR card info vertically */
+  .pr-card-hover .mantine-Group-root {
+    flex-wrap: wrap;
+  }
+}
+
+/* Small phones */
+@media (max-width: 480px) {
+  /* Extra compact */
+  .mantine-Title-root {
+    font-size: 1.25rem !important;
+  }
+
+  [role='tab'] {
+    font-size: 11px !important;
+    padding: 4px 8px !important;
+  }
+}
+
+/* ─── PWA Standalone Mode ───────────────────────────────── */
+@media (display-mode: standalone) {
+  /* Extra top padding for status bar */
+  .mantine-AppShell-header {
+    padding-top: env(safe-area-inset-top);
+    height: calc(60px + env(safe-area-inset-top)) !important;
+  }
 }

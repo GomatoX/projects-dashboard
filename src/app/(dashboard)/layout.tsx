@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect } from 'react';
 import { usePathname } from 'next/navigation';
 import { AppShell } from '@mantine/core';
 import { useDisclosure, useMediaQuery } from '@mantine/hooks';
@@ -12,6 +12,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [opened, { toggle }] = useDisclosure();
   const pathname = usePathname();
   const isMobile = useMediaQuery('(max-width: 768px)');
+
+  // Register service worker for PWA
+  useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {
+        // SW registration failed — non-critical
+      });
+    }
+  }, []);
 
   return (
     <SpotlightProvider>

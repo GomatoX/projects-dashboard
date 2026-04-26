@@ -21,16 +21,16 @@ export const theme = createTheme({
   colors: {
     brand,
     dark: [
-      '#C9C9C9',
-      '#b8b8b8',
-      '#828282',
-      '#696969',
-      '#424242',
-      '#3b3b3b',
-      '#2e2e2e',
-      '#1a1a2e',
-      '#16162a',
-      '#0f0f23',
+      '#d5d7e0', // 0 — primary text (brighter)
+      '#acaebf', // 1 — secondary text (much brighter)
+      '#8c8fa3', // 2 — muted text (visible now)
+      '#666980', // 3 — subtle text / borders
+      '#4d4f66', // 4 — card borders (visible)
+      '#34354a', // 5 — input borders / dividers
+      '#2b2c3d', // 6 — card background / hover
+      '#1d1e30', // 7 — surface background
+      '#141521', // 8 — sidebar / secondary bg
+      '#0c0d1a', // 9 — main background
     ],
   },
   fontFamily:
@@ -80,21 +80,73 @@ export const theme = createTheme({
       defaultProps: {
         radius: 'md',
       },
+      styles: {
+        input: {
+          backgroundColor: 'var(--mantine-color-dark-6)',
+          borderColor: 'var(--mantine-color-dark-4)',
+        },
+      },
+    },
+    PasswordInput: {
+      defaultProps: {
+        radius: 'md',
+      },
+      styles: {
+        input: {
+          backgroundColor: 'var(--mantine-color-dark-6)',
+          borderColor: 'var(--mantine-color-dark-4)',
+        },
+      },
     },
     Select: {
       defaultProps: {
         radius: 'md',
+      },
+      styles: {
+        input: {
+          backgroundColor: 'var(--mantine-color-dark-6)',
+          borderColor: 'var(--mantine-color-dark-4)',
+        },
       },
     },
     Textarea: {
       defaultProps: {
         radius: 'md',
       },
+      styles: {
+        input: {
+          backgroundColor: 'var(--mantine-color-dark-6)',
+          borderColor: 'var(--mantine-color-dark-4)',
+        },
+      },
+    },
+    TagsInput: {
+      defaultProps: {
+        radius: 'md',
+      },
+      styles: {
+        input: {
+          backgroundColor: 'var(--mantine-color-dark-6)',
+          borderColor: 'var(--mantine-color-dark-4)',
+        },
+      },
     },
     Badge: {
       defaultProps: {
         variant: 'light',
         radius: 'sm',
+      },
+    },
+    NavLink: {
+      styles: {
+        label: {
+          color: 'var(--mantine-color-dark-0)',
+        },
+      },
+    },
+    Divider: {
+      defaultProps: {
+        color: 'dark.4',
       },
     },
   },

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
+import Link from 'next/link';
 import {
   Title,
   Group,
@@ -16,7 +17,7 @@ import {
 import { useDisclosure } from '@mantine/hooks';
 import { modals } from '@mantine/modals';
 import { notifications } from '@mantine/notifications';
-import { IconPlus, IconDeviceDesktop, IconRefresh } from '@tabler/icons-react';
+import { IconPlus, IconDeviceDesktop, IconRefresh, IconBook } from '@tabler/icons-react';
 import { DeviceCard } from '@/components/devices/DeviceCard';
 import { AddDeviceModal } from '@/components/devices/AddDeviceModal';
 import type { SystemStats, DiscoveredProject } from '@/lib/socket/types';
@@ -161,6 +162,16 @@ export default function DevicesPage() {
           </Text>
         </Box>
         <Group gap="sm">
+          <Button
+            component={Link}
+            href="/devices/setup"
+            variant="subtle"
+            color="gray"
+            size="sm"
+            leftSection={<IconBook size={14} />}
+          >
+            Setup Guide
+          </Button>
           <Button
             variant="subtle"
             color="gray"

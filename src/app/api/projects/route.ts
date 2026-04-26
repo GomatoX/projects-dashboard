@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { projects, devices } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
+import { projects, devices, chats } from '@/lib/db/schema';
+import { eq, desc, and, gt } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 
 export async function GET() {
@@ -25,7 +25,22 @@ export async function GET() {
       .leftJoin(devices, eq(projects.deviceId, devices.id))
       .orderBy(projects.name);
 
-    return NextResponse.json(allProjects);
+    // Check for active chats (updated in the last 24h)
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const recentChats = await db
+      .select({ projectId: chats.projectId })
+      .from(chats)
+      .where(gt(chats.updatedAt, oneDayAgo))
+      .groupBy(chats.projectId);
+
+    const activeProjectIds = new Set(recentChats.map((c) => c.projectId));
+
+    const enriched = allProjects.map((p) => ({
+      ...p,
+      hasActiveChat: activeProjectIds.has(p.id),
+    }));
+
+    return NextResponse.json(enriched);
   } catch (error) {
     console.error('Failed to fetch projects:', error);
     return NextResponse.json({ error: 'Failed to fetch projects' }, { status: 500 });

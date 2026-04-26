@@ -24,10 +24,14 @@
 }
 
 .deleteBtn {
-  opacity: 0;
+  opacity: 0.3;
   transition: opacity var(--transition-fast);
 }
 
 .card:hover .deleteBtn {
-  opacity: 1;
+  opacity: 0.7;
+}
+
+.deleteBtn:hover {
+  opacity: 1 !important;
 }

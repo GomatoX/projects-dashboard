@@ -39,32 +39,42 @@ export default function SettingsPage() {
       </Group>
 
       <SimpleGrid cols={{ base: 1, md: 2 }} spacing="lg">
-        {/* API Keys */}
+        {/* AI Configuration */}
         <Card>
           <Stack gap="md">
             <Group gap="sm">
               <IconKey size={20} style={{ opacity: 0.6 }} />
               <Text size="sm" fw={600} tt="uppercase" c="dimmed">
-                API Keys
+                AI Configuration
               </Text>
             </Group>
 
-            <PasswordInput
-              label="Anthropic API Key"
-              placeholder="sk-ant-..."
-              description="Required for AI chat and code review"
-            />
+            <Card
+              p="sm"
+              style={{
+                backgroundColor: 'var(--mantine-color-dark-7)',
+                border: '1px solid var(--mantine-color-dark-5)',
+              }}
+            >
+              <Group justify="space-between" mb={4}>
+                <Text size="sm" fw={500}>
+                  Claude Agent SDK
+                </Text>
+                <Badge size="xs" variant="light" color="teal">
+                  CLI Auth
+                </Badge>
+              </Group>
+              <Text size="xs" c="dimmed">
+                The AI chat uses the Claude Agent SDK which authenticates via
+                your local Claude Code CLI. Run{' '}
+                <code>claude login</code> in your terminal if not authenticated.
+              </Text>
+            </Card>
 
             <PasswordInput
               label="GitHub Token"
               placeholder="ghp_..."
               description="Required for PR integration"
-            />
-
-            <PasswordInput
-              label="ElevenLabs API Key"
-              placeholder="Optional — for sound generation"
-              description="Phase 2 feature"
             />
 
             <Button
@@ -90,9 +100,6 @@ export default function SettingsPage() {
               <Text size="sm" fw={600} tt="uppercase" c="dimmed">
                 Sound
               </Text>
-              <Badge size="xs" variant="outline" color="dark.3">
-                Sprint 9
-              </Badge>
             </Group>
 
             <Box>
@@ -113,7 +120,7 @@ export default function SettingsPage() {
             <Switch label="Quiet Hours (22:00 - 08:00)" disabled />
 
             <Text size="xs" c="dimmed">
-              Sound feedback will be available in Sprint 9.
+              Sound feedback coming soon.
             </Text>
           </Stack>
         </Card>
@@ -133,7 +140,7 @@ export default function SettingsPage() {
                 Version
               </Text>
               <Badge variant="light" color="brand">
-                v0.1.0 — Sprint 1
+                v1.0.0 — Release
               </Badge>
             </Group>
             <Group justify="space-between">

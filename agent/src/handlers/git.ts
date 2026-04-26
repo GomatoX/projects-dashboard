@@ -108,23 +108,13 @@ export async function handleGitLog(
 ): Promise<AgentEvent> {
   try {
     const g = git(projectPath);
-    const log = await g.log({
-      maxCount: limit,
-      format: {
-        hash: '%H',
-        hashShort: '%h',
-        message: '%s',
-        author: '%an',
-        date: '%aI',
-        refs: '%D',
-      },
-    });
+    const log = await g.log({ maxCount: limit });
 
     const entries: GitLogEntry[] = log.all.map((entry) => ({
       hash: entry.hash,
-      hashShort: (entry as Record<string, string>).hashShort || entry.hash.slice(0, 7),
+      hashShort: entry.hash.slice(0, 7),
       message: entry.message,
-      author: (entry as Record<string, string>).author || '',
+      author: entry.author_name || '',
       date: entry.date,
       refs: (entry as Record<string, string>).refs || '',
     }));

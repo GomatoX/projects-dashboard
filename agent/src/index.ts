@@ -32,6 +32,13 @@ import {
   handleGitDeleteBranch,
   handleGitStash,
 } from './handlers/git.js';
+import {
+  handleTerminalSpawn,
+  handleTerminalInput,
+  handleTerminalResize,
+  handleTerminalKill,
+  killAllTerminals,
+} from './handlers/terminal.js';
 import type { AgentCommand, AgentEvent } from '../../src/lib/socket/types.js';
 
 console.log('🔧 Dev Dashboard Agent v0.1.0');
@@ -198,6 +205,56 @@ const { socket } = createConnection(config, {
         response = await handleGitStash(command.id, command.projectPath, command.action, command.message);
         break;
 
+      case 'RUN_COMMAND': {
+        const { exec } = await import('child_process');
+        const { promisify } = await import('util');
+        const execAsync = promisify(exec);
+        try {
+          const { stdout, stderr } = await execAsync(command.command, {
+            cwd: command.projectPath,
+            timeout: 30_000,
+            maxBuffer: 1024 * 1024,
+          });
+          response = {
+            type: 'COMMAND_RESULT' as AgentEvent['type'],
+            requestId: command.id,
+            output: (stdout || '') + (stderr ? `\n${stderr}` : ''),
+          } as AgentEvent;
+        } catch (err: unknown) {
+          const error = err as { stdout?: string; stderr?: string; message?: string };
+          response = {
+            type: 'COMMAND_RESULT' as AgentEvent['type'],
+            requestId: command.id,
+            output: (error.stdout || '') + (error.stderr || error.message || 'Command failed'),
+          } as AgentEvent;
+        }
+        break;
+      }
+
+      // Terminal commands — these respond via socket events, not the respond callback
+      case 'TERMINAL_SPAWN':
+        handleTerminalSpawn(
+          socket,
+          command.id,
+          command.sessionId,
+          command.cwd,
+          command.cols,
+          command.rows,
+        );
+        return; // Don't call respond — handler emits events directly
+
+      case 'TERMINAL_INPUT':
+        handleTerminalInput(command.sessionId, command.data);
+        return;
+
+      case 'TERMINAL_RESIZE':
+        handleTerminalResize(command.sessionId, command.cols, command.rows);
+        return;
+
+      case 'TERMINAL_KILL':
+        handleTerminalKill(command.sessionId);
+        return;
+
       default:
         response = {
           type: 'COMMAND_ERROR',
@@ -217,6 +274,7 @@ const shutdown = () => {
   console.log('\n🛑 Shutting down agent...');
   if (heartbeatTimer) clearInterval(heartbeatTimer);
   stopAllLogStreams();
+  killAllTerminals();
   socket.disconnect();
   process.exit(0);
 };

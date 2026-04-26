@@ -11,6 +11,7 @@ import {
 import { useForm } from '@mantine/form';
 import { IconPlus, IconDeviceFloppy } from '@tabler/icons-react';
 import { PROJECT_TYPES } from '@/lib/constants';
+import { FolderPicker } from './FolderPicker';
 
 interface ProjectFormProps {
   initialValues?: {
@@ -56,30 +57,22 @@ export function ProjectForm({
     },
   });
 
+  // Auto-detect project name from path
+  const handlePathChange = (path: string) => {
+    form.setFieldValue('path', path);
+    // If name is empty, extract from path
+    if (!form.values.name && path) {
+      const basename = path.split('/').filter(Boolean).pop();
+      if (basename) {
+        form.setFieldValue('name', basename);
+      }
+    }
+  };
+
   return (
     <form onSubmit={form.onSubmit(onSubmit)}>
       <Stack gap="md">
-        <TextInput
-          label="Project Name"
-          placeholder="my-awesome-project"
-          withAsterisk
-          {...form.getInputProps('name')}
-        />
-
-        <TextInput
-          label="Path"
-          placeholder="/home/user/projects/my-project"
-          withAsterisk
-          {...form.getInputProps('path')}
-        />
-
         <Group grow>
-          <Select
-            label="Type"
-            data={PROJECT_TYPES.map((t) => ({ value: t.value, label: t.label }))}
-            {...form.getInputProps('type')}
-          />
-
           <Select
             label="Device"
             placeholder="Select device"
@@ -87,7 +80,28 @@ export function ProjectForm({
             clearable
             {...form.getInputProps('deviceId')}
           />
+
+          <Select
+            label="Type"
+            data={PROJECT_TYPES.map((t) => ({ value: t.value, label: t.label }))}
+            {...form.getInputProps('type')}
+          />
         </Group>
+
+        <FolderPicker
+          value={form.values.path}
+          onChange={handlePathChange}
+          deviceId={form.values.deviceId}
+          label="Project Path"
+          placeholder="/home/user/projects/my-project"
+        />
+
+        <TextInput
+          label="Project Name"
+          placeholder="my-awesome-project"
+          withAsterisk
+          {...form.getInputProps('name')}
+        />
 
         <TextInput
           label="PM2 Process Name"

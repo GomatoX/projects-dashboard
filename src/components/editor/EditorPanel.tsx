@@ -179,7 +179,7 @@ export function EditorPanel({ projectId, projectPath, deviceId }: EditorPanelPro
     <Box
       style={{
         display: 'flex',
-        height: 'calc(100vh - 220px)',
+        height: '100%',
         minHeight: 500,
         borderRadius: 'var(--mantine-radius-md)',
         border: '1px solid var(--mantine-color-dark-6)',

@@ -27,11 +27,19 @@ import {
   IconBrain,
   IconFolder,
   IconLock,
+  IconBrandGithub,
+  IconTerminal,
+  IconHistory,
 } from '@tabler/icons-react';
 import { PROJECT_TYPE_ICONS } from '@/lib/constants';
 import { PM2Panel } from '@/components/pm2/PM2Panel';
 import { EditorPanel } from '@/components/editor/EditorPanel';
 import { GitPanel } from '@/components/git/GitPanel';
+import { ChatPanel } from '@/components/chat/ChatPanel';
+import { MemoryPanel } from '@/components/memory/MemoryPanel';
+import { GitHubPanel } from '@/components/github/GitHubPanel';
+import { TerminalPanel } from '@/components/terminal/TerminalPanel';
+import { ClaudeSessionsPanel } from '@/components/claude/ClaudeSessionsPanel';
 
 interface Project {
   id: string;
@@ -94,7 +102,7 @@ export default function ProjectDetailPage() {
   );
 
   return (
-    <>
+    <Box style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 100px)' }}>
       {/* Back button + header */}
       <Group mb="xl" gap="lg">
         <ActionIcon
@@ -138,7 +146,7 @@ export default function ProjectDetailPage() {
       </Group>
 
       {/* Tabs */}
-      <Tabs defaultValue="overview" variant="pills" radius="md">
+      <Tabs defaultValue="chat" variant="pills" radius="md" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <Tabs.List mb="lg">
           <Tabs.Tab value="overview" leftSection={<IconFolder size={16} />}>
             Overview
@@ -149,18 +157,27 @@ export default function ProjectDetailPage() {
           <Tabs.Tab value="pm2" leftSection={<IconCpu size={16} />}>
             PM2
           </Tabs.Tab>
-          <Tabs.Tab value="chat" leftSection={<IconMessageCircle size={16} />} disabled>
-            {lockedTab('Chat', null)}
+          <Tabs.Tab value="chat" leftSection={<IconMessageCircle size={16} />}>
+            Chat
           </Tabs.Tab>
           <Tabs.Tab value="editor" leftSection={<IconCode size={16} />}>
             Editor
           </Tabs.Tab>
-          <Tabs.Tab value="memory" leftSection={<IconBrain size={16} />} disabled>
-            {lockedTab('Memory', null)}
+          <Tabs.Tab value="memory" leftSection={<IconBrain size={16} />}>
+            Memory
+          </Tabs.Tab>
+          <Tabs.Tab value="github" leftSection={<IconBrandGithub size={16} />}>
+            GitHub
+          </Tabs.Tab>
+          <Tabs.Tab value="terminal" leftSection={<IconTerminal size={16} />}>
+            Terminal
+          </Tabs.Tab>
+          <Tabs.Tab value="sessions" leftSection={<IconHistory size={16} />}>
+            Sessions
           </Tabs.Tab>
         </Tabs.List>
 
-        <Tabs.Panel value="overview">
+        <Tabs.Panel value="overview" style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
           <SimpleGrid cols={{ base: 1, md: 2 }} spacing="lg">
             <Card>
               <Stack gap="sm">
@@ -230,7 +247,7 @@ export default function ProjectDetailPage() {
           </SimpleGrid>
         </Tabs.Panel>
 
-        <Tabs.Panel value="pm2">
+        <Tabs.Panel value="pm2" style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
           <PM2Panel
             projectId={project.id}
             pm2Name={project.pm2Name}
@@ -238,7 +255,7 @@ export default function ProjectDetailPage() {
           />
         </Tabs.Panel>
 
-        <Tabs.Panel value="editor">
+        <Tabs.Panel value="editor" style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
           <EditorPanel
             projectId={project.id}
             projectPath={project.path}
@@ -246,14 +263,37 @@ export default function ProjectDetailPage() {
           />
         </Tabs.Panel>
 
-        <Tabs.Panel value="git">
+        <Tabs.Panel value="git" style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
           <GitPanel
             projectId={project.id}
             projectPath={project.path}
             deviceId={project.deviceId}
           />
         </Tabs.Panel>
+
+        <Tabs.Panel value="chat" style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+          <ChatPanel
+            projectId={project.id}
+            deviceId={project.deviceId}
+          />
+        </Tabs.Panel>
+
+        <Tabs.Panel value="memory" style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+          <MemoryPanel projectId={project.id} />
+        </Tabs.Panel>
+
+        <Tabs.Panel value="github" style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+          <GitHubPanel projectId={project.id} github={project.github} />
+        </Tabs.Panel>
+
+        <Tabs.Panel value="terminal" style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+          <TerminalPanel projectId={project.id} deviceId={project.deviceId} />
+        </Tabs.Panel>
+
+        <Tabs.Panel value="sessions" style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+          <ClaudeSessionsPanel projectId={project.id} />
+        </Tabs.Panel>
       </Tabs>
-    </>
+    </Box>
   );
 }

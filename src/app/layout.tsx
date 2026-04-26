@@ -12,10 +12,28 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: 'Dev Dashboard',
-  description: 'Multi-device development dashboard for managing projects, deployments, and AI workflows',
+  description:
+    'Multi-device development dashboard for managing projects, deployments, and AI workflows',
   icons: {
-    icon: '/favicon.ico',
+    icon: '/icon-192.png',
+    apple: '/icon-512.png',
   },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'black-translucent',
+    title: 'DevDash',
+  },
+  other: {
+    'mobile-web-app-capable': 'yes',
+  },
+};
+
+export const viewport = {
+  themeColor: '#0dc5d9',
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  viewportFit: 'cover',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

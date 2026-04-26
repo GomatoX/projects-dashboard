@@ -157,6 +157,10 @@ function getRequestId(event: AgentEvent): string | undefined {
   return undefined;
 }
 
+export function getAgentSocket(deviceId: string): Socket | undefined {
+  return connectedAgents.get(deviceId)?.socket;
+}
+
 export function getAgentCount(): number {
   return connectedAgents.size;
 }
