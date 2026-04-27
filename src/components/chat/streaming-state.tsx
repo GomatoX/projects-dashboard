@@ -71,6 +71,14 @@ interface StreamingStateContextValue {
   /** Begin a fresh turn — clears prior content/tools/perms and marks active. */
   begin: (chatId: string) => void;
   appendText: (chatId: string, text: string) => void;
+  /**
+   * Insert a paragraph-break separator between two assistant turns within
+   * the same chat-level streaming bubble. Idempotent at the boundary —
+   * calling it twice in a row, or right after content that already ends
+   * with `\n\n`, won't stack additional blank lines (which the markdown
+   * renderer would otherwise turn into ever-larger gaps).
+   */
+  appendTurnBreak: (chatId: string) => void;
   setSessionId: (chatId: string, sessionId: string) => void;
   addToolActivity: (chatId: string, activity: ToolActivity) => void;
   addPermission: (chatId: string, perm: PermissionRequest) => void;
@@ -127,6 +135,23 @@ export function StreamingStateProvider({ children }: { children: ReactNode }) {
   const appendText = useCallback(
     (chatId: string, text: string) => {
       update(chatId, (s) => ({ ...s, content: s.content + text }));
+    },
+    [update],
+  );
+
+  const appendTurnBreak = useCallback(
+    (chatId: string) => {
+      update(chatId, (s) => {
+        // Don't add a separator before any content has streamed — there's
+        // nothing to separate from yet (would render as a leading empty
+        // paragraph). Also skip when the buffer already ends with one,
+        // which prevents stacked breaks if the server emits redundant
+        // turn_break markers (e.g. trailing one at the very end of the
+        // turn that gets consumed by both the local and remote paths).
+        if (s.content.length === 0) return s;
+        if (s.content.endsWith('\n\n')) return s;
+        return { ...s, content: s.content + '\n\n' };
+      });
     },
     [update],
   );
@@ -208,6 +233,7 @@ export function StreamingStateProvider({ children }: { children: ReactNode }) {
       get,
       begin,
       appendText,
+      appendTurnBreak,
       setSessionId,
       addToolActivity,
       addPermission,
@@ -220,6 +246,7 @@ export function StreamingStateProvider({ children }: { children: ReactNode }) {
       get,
       begin,
       appendText,
+      appendTurnBreak,
       setSessionId,
       addToolActivity,
       addPermission,

@@ -25,6 +25,7 @@ import {
   IconCoins,
   IconServer,
   IconCloud,
+  IconPlayerStopFilled,
 } from '@tabler/icons-react';
 import { notify } from '@/lib/notify';
 import { playSound } from '@/lib/audio';
@@ -113,6 +114,16 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
   const [respondingTo, setRespondingTo] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Per-chat AbortController for the in-flight POST /stream fetch. Held in
+  // a ref (not state) because it's mutated from inside `sendMessage`'s
+  // closure and the Stop button — neither needs a re-render. Cleaned up in
+  // sendMessage's `finally` and on stopChat success. Keyed by chatId so a
+  // stop click on one chat can't accidentally abort a sibling stream.
+  const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
+  // Set of chat IDs the user has just clicked Stop on. We disable the
+  // button while the cancel request is in flight; cleared once the
+  // surviving SSE handler hits `done` (or the network roundtrip fails).
+  const [cancellingChats, setCancellingChats] = useState<Set<string>>(new Set());
   // Tracks the chat the user is currently viewing without re-creating the
   // sendMessage closure on every switch. The streaming reader runs for the
   // full duration of an agent turn and needs an up-to-date reference, not the
@@ -225,6 +236,12 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
         const cur = streaming.get(chatId);
         if (!cur.active) streaming.begin(chatId);
         streaming.appendText(chatId, event.text as string);
+        return;
+      }
+      if (event.type === 'turn_break') {
+        const cur = streaming.get(chatId);
+        if (!cur.active) streaming.begin(chatId);
+        streaming.appendTurnBreak(chatId);
         return;
       }
       if (event.type === 'tool_use') {
@@ -525,6 +542,11 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
         streaming.setSessionId(chatId, event.sessionId as string);
       } else if (event.type === 'text') {
         streaming.appendText(chatId, event.text as string);
+      } else if (event.type === 'turn_break') {
+        // Server signals a multi-turn assistant response (text → tool →
+        // more text). Inject a paragraph break so the live bubble shows
+        // the same separation as the persisted row will after refetch.
+        streaming.appendTurnBreak(chatId);
       } else if (event.type === 'done') {
         // The server now persists the assistant row BEFORE emitting
         // `done`, so refetching /messages here is race-free and gives us
@@ -586,6 +608,14 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
       }
     };
 
+    // Abort controller for this turn — the Stop button calls
+    // `controller.abort()` to tear the streaming reader down and the
+    // separate /cancel POST aborts the server-side SDK query (local) or
+    // the device session (remote). We register before the fetch starts so
+    // a stop click that lands during the upload phase still cleans up.
+    const abortController = new AbortController();
+    abortControllersRef.current.set(chatId, abortController);
+
     try {
       const res = await fetch(
         `/api/projects/${projectId}/chat/${chatId}/stream`,
@@ -600,6 +630,7 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
             attachments: attachmentsJson,
             executionMode: chatList.find((c) => c.id === chatId)?.executionMode ?? 'local',
           }),
+          signal: abortController.signal,
         },
       );
 
@@ -647,17 +678,92 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
           // ignore
         }
       }
-    } catch {
-      notify({
-        title: 'Error',
-        message: 'Failed to get AI response',
-        color: 'red',
-      });
+    } catch (err) {
+      // AbortError is the expected outcome of the Stop button — don't
+      // surface it as a failure toast. Anything else is a real network
+      // / server error worth telling the user about.
+      const name = (err as { name?: string } | null)?.name;
+      if (name !== 'AbortError') {
+        notify({
+          title: 'Error',
+          message: 'Failed to get AI response',
+          color: 'red',
+        });
+      }
     } finally {
+      // Drop the controller from the ref FIRST so a late stopChat click
+      // (between the SSE reader exit and this finally) doesn't try to
+      // abort an already-finished request and inadvertently flag the
+      // chat as still cancelling.
+      const cur = abortControllersRef.current.get(chatId);
+      if (cur === abortController) abortControllersRef.current.delete(chatId);
+      setCancellingChats((prev) => withRemoved(prev, chatId));
       setStreamingChats((prev) => withRemoved(prev, chatId));
       streaming.end(chatId);
     }
   };
+
+  // Stop an in-flight turn for the active chat. Two parallel actions:
+  //   1. Abort the local fetch reader so the streaming UI tears down
+  //      immediately (the server-side agent might still flush a final
+  //      `done` event, which is fine — it lands on a controller that
+  //      no longer has a listener).
+  //   2. POST /cancel so the server actually stops the SDK query (local)
+  //      or forwards CLAUDE_CANCEL to the device (remote). The endpoint
+  //      decides which path to take based on the chat's executionMode.
+  // Either side succeeding is enough to surface the right UI state.
+  const stopChat = useCallback(
+    async (chatId: string) => {
+      if (cancellingChats.has(chatId)) return;
+      setCancellingChats((prev) => withAdded(prev, chatId));
+
+      // (1) Local fetch teardown — abort BEFORE the network call so a
+      // slow /cancel response doesn't keep the bubble looking active.
+      const controller = abortControllersRef.current.get(chatId);
+      if (controller) {
+        try {
+          controller.abort();
+        } catch {
+          // already aborted
+        }
+        abortControllersRef.current.delete(chatId);
+      }
+
+      // (2) Tell the server to stop. Best-effort — even if this fails
+      // (offline, route 500s, etc.) the client side has already been
+      // torn down by step 1 and the chat will return to an idle state
+      // when the SSE reader exits.
+      try {
+        const sessionId = streaming.get(chatId).sessionId;
+        await fetch(
+          `/api/projects/${projectId}/chat/${chatId}/cancel`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(sessionId ? { sessionId } : {}),
+          },
+        );
+      } catch {
+        // Swallow — the local teardown already happened. We deliberately
+        // don't toast here: the user's intent was "stop", so any visible
+        // "stopping failed" message would be more confusing than helpful.
+      }
+
+      // Local-streamed turns: the sendMessage `finally` will clear the
+      // `cancellingChats` entry as part of its own cleanup. Server-side
+      // / reattach turns (where sendMessage isn't running in this tab):
+      // clear it once the SSE reader sees `done`/error. Worst case the
+      // chat-list poll resyncs `serverStreamingChats` and the spinner
+      // disappears — but `cancellingChats` is purely local UX state, so
+      // also drop it ourselves on a short delay so the button doesn't
+      // stay stuck if no SSE event ever arrives (e.g. journal already
+      // ended between snapshot and our cancel landing).
+      setTimeout(() => {
+        setCancellingChats((prev) => withRemoved(prev, chatId));
+      }, 4000);
+    },
+    [cancellingChats, projectId, streaming],
+  );
 
   // Handle permission approval — routes to the correct endpoint based on mode
   const approvePermission = async (toolUseId: string) => {
@@ -931,6 +1037,26 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
               <Text size="sm" fw={500}>
                 {activeChatData.title}
               </Text>
+              {activeShowsLiveTurn && activeChat && (
+                <Tooltip
+                  label={
+                    cancellingChats.has(activeChat) ? 'Stopping…' : 'Stop generating'
+                  }
+                  withArrow
+                >
+                  <ActionIcon
+                    size="sm"
+                    color="red"
+                    variant="light"
+                    loading={cancellingChats.has(activeChat)}
+                    disabled={cancellingChats.has(activeChat)}
+                    onClick={() => stopChat(activeChat)}
+                    aria-label="Stop generating"
+                  >
+                    <IconPlayerStopFilled size={12} />
+                  </ActionIcon>
+                </Tooltip>
+              )}
             </Group>
             <Group gap="xs" align="center" wrap="nowrap">
               <Select
