@@ -517,8 +517,6 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
     setStreamingChats((prev) => withAdded(prev, chatId));
     streaming.begin(chatId);
 
-    let accumulated = '';
-
     // Single place that knows how to interpret a parsed SSE event. Defined
     // up-front so the buffered reader below can call it from one spot.
     const handleEvent = (event: Record<string, unknown>) => {
@@ -526,25 +524,24 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
         // Remote mode: capture the sessionId for cancel/permission
         streaming.setSessionId(chatId, event.sessionId as string);
       } else if (event.type === 'text') {
-        accumulated += event.text as string;
         streaming.appendText(chatId, event.text as string);
       } else if (event.type === 'done') {
-        const assistantMsg: ChatMsg = {
-          id: event.messageId as string,
-          chatId,
-          role: 'assistant',
-          content: accumulated,
-          toolUses: '[]',
-          proposedChanges: '[]',
-          attachments: '[]',
-          tokensIn: event.tokensIn as number,
-          tokensOut: event.tokensOut as number,
-          timestamp: new Date().toISOString(),
-        };
+        // The server now persists the assistant row BEFORE emitting
+        // `done`, so refetching /messages here is race-free and gives us
+        // the canonical row (with full tool_uses, tokens, etc.) — which
+        // the live `accumulated` text accumulator would not capture. End
+        // the slice synchronously so `active` flips false; defer the
+        // hard `clear` until after the fetch resolves so the streaming
+        // bubble doesn't flash off before the persisted row renders.
+        streaming.end(chatId);
         if (activeChatRef.current === chatId) {
-          setMessages((prev) => [...prev, assistantMsg]);
+          fetchMessages(chatId).finally(() => {
+            streaming.clear(chatId);
+          });
+        } else {
+          // Not the active chat — no bubble to flash. Drop immediately.
+          streaming.clear(chatId);
         }
-        streaming.clear(chatId);
         playSound('taskComplete');
         fetchChats();
       } else if (event.type === 'permission_request') {

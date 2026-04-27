@@ -463,21 +463,12 @@ function handleLocalStream(args: StreamArgs) {
           }
         }
 
-        // Send done event
-        await writeEvent(safeEnqueue, encoder, chatId, {
-          type: 'done',
-          messageId: assistantMsgId,
-          tokensIn: inputTokens,
-          tokensOut: outputTokens,
-          cost: totalCost,
-        });
-      } catch (error) {
-        console.error('[Chat] Stream error:', error);
-        const errorMsg =
-          error instanceof Error ? error.message : 'AI request failed';
-        await writeEvent(safeEnqueue, encoder, chatId, { type: 'error', message: errorMsg });
-      } finally {
-        // Always save assistant message to DB (even if stream errored)
+        // Persist the assistant row BEFORE signaling done. The client's
+        // done handler refetches /messages so the optimistic streaming
+        // bubble is replaced by the canonical row (which includes
+        // tool_uses, tokens, etc. that the live text accumulator does
+        // not capture). Emitting done first would race with this insert
+        // and the refetch would see a stale message list.
         if (fullContent) {
           console.log(
             `[Chat] Saving assistant message: ${assistantMsgId}, content length: ${fullContent.length}`,
@@ -517,6 +508,43 @@ function handleLocalStream(args: StreamArgs) {
           }
         }
 
+        // Send done event
+        await writeEvent(safeEnqueue, encoder, chatId, {
+          type: 'done',
+          messageId: assistantMsgId,
+          tokensIn: inputTokens,
+          tokensOut: outputTokens,
+          cost: totalCost,
+        });
+      } catch (error) {
+        console.error('[Chat] Stream error:', error);
+        const errorMsg =
+          error instanceof Error ? error.message : 'AI request failed';
+        // Best-effort persist any partial content the agent produced
+        // before the error. If the try block already inserted the row,
+        // the PK collision is caught and ignored — the row is in DB.
+        if (fullContent) {
+          try {
+            await db.insert(chatMessages).values({
+              id: assistantMsgId,
+              chatId,
+              role: 'assistant',
+              content: fullContent,
+              toolUses: JSON.stringify(toolUses),
+              proposedChanges: '[]',
+              attachments: '[]',
+              executionMode: 'local',
+              tokensIn: inputTokens,
+              tokensOut: outputTokens,
+              timestamp: new Date(),
+            });
+          } catch {
+            // Either already persisted in the try block or PK collision;
+            // both are fine — the row is in DB.
+          }
+        }
+        await writeEvent(safeEnqueue, encoder, chatId, { type: 'error', message: errorMsg });
+      } finally {
         await markStreamEnd(projectId, chatId);
         safeClose();
       }
@@ -710,18 +738,9 @@ function handleRemoteStream(args: StreamArgs) {
             tokensOut = (event.tokensOut as number) ?? 0;
             costUsd = (event.costUsd as number) ?? 0;
 
-            await writeEvent(safeEnqueue, encoder, chatId, {
-              type: 'done',
-              messageId: assistantMsgId,
-              tokensIn,
-              tokensOut,
-              cost: costUsd,
-              sessionId,
-            });
-
-            socket.off('event', onEvent);
-
-            // Persist and close
+            // Persist BEFORE signaling done so the client's refetch sees
+            // the assistant row immediately. (See local handler for the
+            // same race rationale.)
             try {
               if (fullContent) {
                 await db.insert(chatMessages).values({
@@ -758,10 +777,20 @@ function handleRemoteStream(args: StreamArgs) {
               }
             } catch (err) {
               console.error('[Chat/Remote] Failed to save message:', err);
-            } finally {
-              await markStreamEnd(projectId, chatId);
-              safeClose();
             }
+
+            await writeEvent(safeEnqueue, encoder, chatId, {
+              type: 'done',
+              messageId: assistantMsgId,
+              tokensIn,
+              tokensOut,
+              cost: costUsd,
+              sessionId,
+            });
+
+            socket.off('event', onEvent);
+            await markStreamEnd(projectId, chatId);
+            safeClose();
             break;
           }
 
