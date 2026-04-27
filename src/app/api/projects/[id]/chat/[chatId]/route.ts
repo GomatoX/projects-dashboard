@@ -32,9 +32,14 @@ export async function PATCH(
   const body = await request.json();
 
   try {
+    const updates: Record<string, unknown> = { updatedAt: new Date() };
+    if (body.model) updates.model = body.model;
+    if (body.executionMode === 'local' || body.executionMode === 'remote') {
+      updates.executionMode = body.executionMode;
+    }
     await db
       .update(chats)
-      .set({ model: body.model, updatedAt: new Date() })
+      .set(updates)
       .where(eq(chats.id, chatId));
 
     return NextResponse.json({ success: true });

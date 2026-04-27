@@ -43,6 +43,7 @@ export async function POST(
     projectId,
     title: body.title || 'New Chat',
     model: body.model || 'claude-sonnet-4-6',
+    executionMode: body.executionMode === 'remote' ? 'remote' as const : 'local' as const,
     totalTokensIn: 0,
     totalTokensOut: 0,
     estimatedCost: 0,

@@ -1,0 +1,1 @@
+ALTER TABLE `devices` ADD `claude_config` text;

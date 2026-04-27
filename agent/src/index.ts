@@ -39,6 +39,12 @@ import {
   handleTerminalKill,
   killAllTerminals,
 } from './handlers/terminal.js';
+import {
+  runClaudeQuery,
+  cancelClaudeSession,
+  cancelAllClaudeSessions,
+  handleClaudePermissionResponse,
+} from './handlers/claude.js';
 import type { AgentCommand, AgentEvent } from '../../src/lib/socket/types.js';
 
 console.log('🔧 Dev Dashboard Agent v0.1.0');
@@ -269,6 +275,41 @@ const { socket } = createConnection(config, {
         handleTerminalKill(command.sessionId);
         return;
 
+      // ─── Remote Claude (Agent SDK) ─────────────────────────
+      // Streaming workloads — the handlers emit CLAUDE_* events keyed by
+      // sessionId rather than returning a single response, so we don't
+      // call `respond()` here. The dashboard's SSE relay is listening on
+      // every agent event and filters by sessionId.
+      case 'CLAUDE_QUERY':
+        // Fire and forget — do NOT await. Awaiting would block the
+        // command handler for the entire SDK loop (potentially minutes),
+        // queueing every other command behind it.
+        void runClaudeQuery({
+          socket,
+          sessionId: command.sessionId,
+          requestId: command.id,
+          projectPath: command.projectPath,
+          prompt: command.prompt,
+          systemPrompt: command.systemPrompt,
+          model: command.model,
+          maxTurns: command.maxTurns,
+          claudePath: command.claudePath,
+          permissions: command.permissions,
+        });
+        return;
+
+      case 'CLAUDE_CANCEL':
+        cancelClaudeSession(command.sessionId);
+        return;
+
+      case 'CLAUDE_PERMISSION_RESPONSE':
+        handleClaudePermissionResponse(
+          command.sessionId,
+          command.requestId,
+          command.decision,
+        );
+        return;
+
       default:
         response = {
           type: 'COMMAND_ERROR',
@@ -289,6 +330,7 @@ const shutdown = () => {
   if (heartbeatTimer) clearInterval(heartbeatTimer);
   stopAllLogStreams();
   killAllTerminals();
+  cancelAllClaudeSessions();
   socket.disconnect();
   process.exit(0);
 };

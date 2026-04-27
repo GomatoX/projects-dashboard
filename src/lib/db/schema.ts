@@ -28,6 +28,11 @@ export const devices = sqliteTable(
     lastSeen: integer('last_seen', { mode: 'timestamp' }),
     projectPaths: text('project_paths').notNull().default('[]'),
     capabilities: text('capabilities').notNull().default('[]'),
+    // JSON-encoded ClaudePermissionConfig; NULL means "use defaults".
+    // Per-device because policy depends on physical trust: a Mac on
+    // your desk is not the same risk profile as a remote VPS, even
+    // though both run the same agent binary.
+    claudeConfig: text('claude_config'),
     createdAt: integer('created_at', { mode: 'timestamp' })
       .notNull()
       .$defaultFn(() => new Date()),
@@ -121,6 +126,9 @@ export const chats = sqliteTable(
       .references(() => projects.id, { onDelete: 'cascade' }),
     title: text('title').notNull().default('New Chat'),
     model: text('model').notNull().default('claude-sonnet-4-20250514'),
+    executionMode: text('execution_mode', { enum: ['local', 'remote'] })
+      .notNull()
+      .default('local'),
     totalTokensIn: integer('total_tokens_in').notNull().default(0),
     totalTokensOut: integer('total_tokens_out').notNull().default(0),
     estimatedCost: real('estimated_cost').notNull().default(0),
@@ -154,6 +162,7 @@ export const chatMessages = sqliteTable(
     attachments: text('attachments').notNull().default('[]'),
     tokensIn: integer('tokens_in'),
     tokensOut: integer('tokens_out'),
+    executionMode: text('execution_mode', { enum: ['local', 'remote'] }),
     timestamp: integer('timestamp', { mode: 'timestamp' })
       .notNull()
       .$defaultFn(() => new Date()),

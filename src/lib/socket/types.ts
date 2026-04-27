@@ -91,7 +91,33 @@ export type AgentCommand =
       cols: number;
       rows: number;
     }
-  | { type: 'TERMINAL_KILL'; id: string; sessionId: string };
+  | { type: 'TERMINAL_KILL'; id: string; sessionId: string }
+
+  // ─── Remote Claude (Claude Agent SDK on the device) ─────
+  // CLAUDE_QUERY kicks off a streaming SDK session on the device. The agent
+  // responds via socket events keyed by sessionId, NOT through the request/
+  // response channel — sessions can run for minutes and emit hundreds of
+  // events, so the regular pendingCommands map would time them out.
+  | {
+      type: 'CLAUDE_QUERY';
+      id: string;
+      sessionId: string;
+      projectPath: string;
+      prompt: string;
+      systemPrompt?: string;
+      model?: string;
+      maxTurns?: number;
+      claudePath?: string;
+      permissions: ClaudePermissionConfig;
+    }
+  | { type: 'CLAUDE_CANCEL'; id: string; sessionId: string }
+  | {
+      type: 'CLAUDE_PERMISSION_RESPONSE';
+      id: string;
+      sessionId: string;
+      requestId: string;
+      decision: 'allow' | 'deny';
+    };
 
 // ─── Agent → Dashboard Events ─────────────────────────────
 export type AgentEvent =
@@ -151,7 +177,53 @@ export type AgentEvent =
   // Terminal events
   | { type: 'TERMINAL_SPAWNED'; requestId: string; sessionId: string }
   | { type: 'TERMINAL_OUTPUT'; sessionId: string; data: string }
-  | { type: 'TERMINAL_EXIT'; sessionId: string; exitCode: number };
+  | { type: 'TERMINAL_EXIT'; sessionId: string; exitCode: number }
+
+  // ─── Remote Claude events ─────────────────────────────
+  | {
+      type: 'CLAUDE_STARTED';
+      sessionId: string;
+      requestId: string;
+      cwd: string;
+      hostname: string;
+    }
+  | { type: 'CLAUDE_TEXT'; sessionId: string; text: string }
+  | {
+      type: 'CLAUDE_TOOL_USE';
+      sessionId: string;
+      toolUseId: string;
+      toolName: string;
+      input: Record<string, unknown>;
+      // 'auto' = allowed silently (e.g. Read in readOnly mode)
+      // 'started' = user just approved via prompt
+      // 'completed' = SDK finished the call (input echoed for display)
+      // 'denied' = blocked by policy or user
+      status: 'auto' | 'started' | 'completed' | 'denied';
+      result?: string;
+    }
+  | {
+      type: 'CLAUDE_PERMISSION_REQUEST';
+      sessionId: string;
+      requestId: string;
+      toolName: string;
+      input: Record<string, unknown>;
+      reason: string;
+    }
+  | {
+      type: 'CLAUDE_DONE';
+      sessionId: string;
+      requestId: string;
+      tokensIn: number;
+      tokensOut: number;
+      costUsd: number;
+      durationMs: number;
+    }
+  | {
+      type: 'CLAUDE_ERROR';
+      sessionId: string;
+      requestId: string;
+      message: string;
+    };
 
 // ─── Response wrapper (for command → response flow) ───────
 export interface CommandResponse<T = unknown> {
@@ -291,3 +363,40 @@ export interface GitLogEntry {
   date: string; // ISO
   refs: string;
 }
+
+// ─── Remote Claude Permission Policy ──────────────────────
+//
+// Per-device policy that gates every Claude tool invocation. Stored as JSON
+// in `devices.claude_config`; the agent reads it once per CLAUDE_QUERY and
+// the canUseTool callback decides allow/deny/ask based on it.
+//
+// Modes:
+//   - 'bypass'      → allow every tool, no prompts. Only for trusted local
+//                     dev machines where the user owns the keyboard.
+//   - 'readOnly'    → allow Read/Glob/Grep/LS/WebSearch/WebFetch and a
+//                     handful of other inert tools; deny anything that can
+//                     mutate state (Edit, Write, Bash, etc.).
+//   - 'interactive' → ask the user for each tool unless it appears in
+//                     `autoAllowTools`. Bash commands matching any string
+//                     in `denyPatterns` are denied outright (e.g. `rm -rf /`).
+export type ClaudePermissionMode = 'bypass' | 'readOnly' | 'interactive';
+
+export interface ClaudePermissionConfig {
+  mode: ClaudePermissionMode;
+  /** Tool names that auto-allow even in interactive mode. */
+  autoAllowTools: string[];
+  /** Substrings that, if present in a Bash command, force a deny. */
+  denyPatterns: string[];
+}
+
+/**
+ * Safe defaults for a freshly registered device. Interactive so the user
+ * sees what Claude wants to do, with Read-family tools auto-allowed because
+ * they're inert and prompting for every Read would make any non-trivial
+ * task painful. Deny patterns block the obvious foot-guns.
+ */
+export const DEFAULT_CLAUDE_PERMISSIONS: ClaudePermissionConfig = {
+  mode: 'interactive',
+  autoAllowTools: ['Read', 'Glob', 'Grep', 'LS', 'WebSearch', 'WebFetch'],
+  denyPatterns: ['rm -rf /', 'mkfs', ':(){ :|:& };:', 'dd if=', '> /dev/sda'],
+};

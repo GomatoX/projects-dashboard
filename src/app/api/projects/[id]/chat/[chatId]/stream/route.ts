@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import type {
   SDKMessage,
@@ -9,11 +10,24 @@ import type {
 } from '@anthropic-ai/claude-agent-sdk';
 import { nanoid } from 'nanoid';
 import { db } from '@/lib/db';
-import { chats, chatMessages, projects, projectMemory } from '@/lib/db/schema';
+import { chats, chatMessages, projects, projectMemory, devices } from '@/lib/db/schema';
 import { eq, asc } from 'drizzle-orm';
 import { shouldAutoAllow, getToolMeta } from '@/lib/ai/tools';
 import { createPermissionRequest } from '@/lib/ai/permission-store';
 import { markStreamStart, markStreamEnd } from '@/lib/ai/active-streams';
+import {
+  DEFAULT_CLAUDE_PERMISSIONS,
+  type AgentCommand,
+  type ClaudePermissionConfig,
+} from '@/lib/socket/types';
+
+type AgentManagerModule = typeof import('@/lib/socket/agent-manager');
+
+function getAgentManager(): AgentManagerModule | null {
+  return (globalThis as Record<string, unknown>).__agentManager as
+    | AgentManagerModule
+    | null;
+}
 
 // Shape of the metadata POST /attachments returns. Matches what the client
 // stores on the user message and what we read back here when building the
@@ -34,6 +48,7 @@ export async function POST(
   const { id: projectId, chatId } = await params;
   const body = await request.json();
   const userMessage: string = body.message ?? '';
+  const executionMode: 'local' | 'remote' | undefined = body.executionMode;
 
   // `attachments` arrives as a JSON-encoded string (the same blob we persist
   // on chatMessages.attachments). Parse defensively — a bad payload should
@@ -74,7 +89,19 @@ export async function POST(
     });
   }
 
-  // Save user message
+  // Resolve effective execution mode: explicit body field > chat row > 'local'
+  const effectiveMode: 'local' | 'remote' =
+    executionMode ?? chat.executionMode ?? 'local';
+
+  // If the mode changed, persist it on the chat row so it sticks.
+  if (effectiveMode !== chat.executionMode) {
+    await db
+      .update(chats)
+      .set({ executionMode: effectiveMode, updatedAt: new Date() })
+      .where(eq(chats.id, chatId));
+  }
+
+  // Save user message (with executionMode tag)
   const userMsgId = nanoid();
   await db.insert(chatMessages).values({
     id: userMsgId,
@@ -84,6 +111,7 @@ export async function POST(
     toolUses: '[]',
     proposedChanges: '[]',
     attachments: body.attachments || '[]',
+    executionMode: effectiveMode,
     timestamp: new Date(),
   });
 
@@ -163,16 +191,57 @@ export async function POST(
     ? `Previous conversation:\n${historyContext}\n\nHuman: ${userTurn}`
     : userTurn;
 
-  // Stream response
+  // ─── Route to the correct execution backend ──────────────
+  if (effectiveMode === 'remote') {
+    return handleRemoteStream({
+      request,
+      projectId,
+      chatId,
+      chat,
+      project,
+      fullPrompt,
+      systemPrompt,
+      userMessage,
+      history,
+    });
+  }
+
+  return handleLocalStream({
+    request,
+    projectId,
+    chatId,
+    chat,
+    project,
+    fullPrompt,
+    systemPrompt,
+    userMessage,
+    history,
+  });
+}
+
+// ─── LOCAL execution (existing pipeline, unchanged) ─────────
+
+interface StreamArgs {
+  request: NextRequest;
+  projectId: string;
+  chatId: string;
+  chat: typeof chats.$inferSelect;
+  project: typeof projects.$inferSelect;
+  fullPrompt: string;
+  systemPrompt: string;
+  userMessage: string;
+  history: (typeof chatMessages.$inferSelect)[];
+}
+
+function handleLocalStream(args: StreamArgs) {
+  const { projectId, chatId, chat, project, fullPrompt, systemPrompt, userMessage, history } =
+    args;
+
   const encoder = new TextEncoder();
   const assistantMsgId = nanoid();
 
-  // Reference for the SSE controller so canUseTool can emit events
-  let sseController: ReadableStreamDefaultController | null = null;
-
   const stream = new ReadableStream({
     async start(controller) {
-      sseController = controller;
       let closed = false;
 
       // Register this project + chat as having an active streaming session.
@@ -391,6 +460,7 @@ export async function POST(
               toolUses: JSON.stringify(toolUses),
               proposedChanges: '[]',
               attachments: '[]',
+              executionMode: 'local',
               tokensIn: inputTokens,
               tokensOut: outputTokens,
               timestamp: new Date(),
@@ -419,6 +489,347 @@ export async function POST(
         markStreamEnd(projectId, chatId);
         safeClose();
       }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    },
+  });
+}
+
+// ─── REMOTE execution (device-side agent via Socket.io) ─────
+
+function handleRemoteStream(args: StreamArgs) {
+  const { request, projectId, chatId, chat, project, fullPrompt, systemPrompt, userMessage, history } =
+    args;
+
+  const encoder = new TextEncoder();
+  const assistantMsgId = nanoid();
+  const sessionId = crypto.randomUUID();
+
+  const stream = new ReadableStream({
+    async start(controller) {
+      let closed = false;
+
+      markStreamStart(projectId, chatId);
+
+      const safeEnqueue = (data: Uint8Array) => {
+        if (!closed) {
+          try {
+            controller.enqueue(data);
+          } catch {
+            closed = true;
+          }
+        }
+      };
+
+      const safeClose = () => {
+        if (!closed) {
+          closed = true;
+          try {
+            controller.close();
+          } catch {
+            // already closed
+          }
+        }
+      };
+
+      // ─── Validate device connectivity ───────────────────
+      if (!project.deviceId) {
+        safeEnqueue(
+          encoder.encode(
+            `data: ${JSON.stringify({
+              type: 'error',
+              message: 'Project has no device assigned',
+              code: 'DEVICE_OFFLINE',
+            })}\n\n`,
+          ),
+        );
+        markStreamEnd(projectId, chatId);
+        safeClose();
+        return;
+      }
+
+      const agentManager = getAgentManager();
+      if (!agentManager || !agentManager.isDeviceConnected(project.deviceId)) {
+        safeEnqueue(
+          encoder.encode(
+            `data: ${JSON.stringify({
+              type: 'error',
+              message: 'Device is not connected',
+              code: 'DEVICE_OFFLINE',
+            })}\n\n`,
+          ),
+        );
+        markStreamEnd(projectId, chatId);
+        safeClose();
+        return;
+      }
+
+      const socket = agentManager.getAgentSocket(project.deviceId);
+      if (!socket) {
+        safeEnqueue(
+          encoder.encode(
+            `data: ${JSON.stringify({
+              type: 'error',
+              message: 'Agent socket not available',
+              code: 'DEVICE_OFFLINE',
+            })}\n\n`,
+          ),
+        );
+        markStreamEnd(projectId, chatId);
+        safeClose();
+        return;
+      }
+
+      // ─── Load device permission policy ──────────────────
+      let permissions: ClaudePermissionConfig = DEFAULT_CLAUDE_PERMISSIONS;
+      try {
+        const [device] = await db
+          .select()
+          .from(devices)
+          .where(eq(devices.id, project.deviceId));
+        if (device?.claudeConfig) {
+          permissions = JSON.parse(device.claudeConfig) as ClaudePermissionConfig;
+        }
+      } catch {
+        // Use defaults on parse error
+      }
+
+      // ─── Stream state ──────────────────────────────────
+      let fullContent = '';
+      const toolUses: Array<{
+        id: string;
+        toolName: string;
+        input: Record<string, unknown>;
+        status: string;
+      }> = [];
+      let tokensIn = 0;
+      let tokensOut = 0;
+      let costUsd = 0;
+
+      // Emit session_started so the client knows the sessionId for
+      // cancel/permission round-trips.
+      safeEnqueue(
+        encoder.encode(
+          `data: ${JSON.stringify({
+            type: 'session_started',
+            sessionId,
+          })}\n\n`,
+        ),
+      );
+
+      // ─── Listen for agent events filtered by sessionId ──
+      const onEvent = (event: Record<string, unknown>) => {
+        if (event.sessionId !== sessionId) return;
+
+        const type = event.type as string;
+
+        switch (type) {
+          case 'CLAUDE_TEXT': {
+            const text = event.text as string;
+            fullContent += text;
+            safeEnqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({ type: 'text', text })}\n\n`,
+              ),
+            );
+            break;
+          }
+
+          case 'CLAUDE_TOOL_USE': {
+            const toolStatus = event.status as string;
+            const toolUseId = event.toolUseId as string;
+            const toolName = event.toolName as string;
+            const input = event.input as Record<string, unknown>;
+
+            // Track tool uses for DB persistence
+            const existing = toolUses.find((t) => t.id === toolUseId);
+            if (existing) {
+              existing.status = toolStatus;
+            } else {
+              toolUses.push({ id: toolUseId, toolName, input, status: toolStatus });
+            }
+
+            // Translate to the SSE shape ChatPanel already understands
+            safeEnqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({
+                  type: 'tool_use',
+                  tool: {
+                    id: toolUseId,
+                    toolName,
+                    displayName: toolName,
+                    status: toolStatus,
+                    input,
+                  },
+                })}\n\n`,
+              ),
+            );
+            break;
+          }
+
+          case 'CLAUDE_PERMISSION_REQUEST': {
+            safeEnqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({
+                  type: 'permission_request',
+                  sessionId,
+                  requestId: event.requestId as string,
+                  toolName: event.toolName as string,
+                  input: event.input as Record<string, unknown>,
+                  reason: event.reason as string,
+                })}\n\n`,
+              ),
+            );
+            break;
+          }
+
+          case 'CLAUDE_DONE': {
+            tokensIn = (event.tokensIn as number) ?? 0;
+            tokensOut = (event.tokensOut as number) ?? 0;
+            costUsd = (event.costUsd as number) ?? 0;
+
+            safeEnqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({
+                  type: 'done',
+                  messageId: assistantMsgId,
+                  tokensIn,
+                  tokensOut,
+                  cost: costUsd,
+                  sessionId,
+                })}\n\n`,
+              ),
+            );
+
+            // Persist and close — done inside an async IIFE because the
+            // event handler is sync.
+            (async () => {
+              try {
+                if (fullContent) {
+                  await db.insert(chatMessages).values({
+                    id: assistantMsgId,
+                    chatId,
+                    role: 'assistant',
+                    content: fullContent,
+                    toolUses: JSON.stringify(toolUses),
+                    proposedChanges: '[]',
+                    attachments: '[]',
+                    executionMode: 'remote',
+                    tokensIn,
+                    tokensOut,
+                    timestamp: new Date(),
+                  });
+                }
+
+                await db
+                  .update(chats)
+                  .set({
+                    totalTokensIn: chat.totalTokensIn + tokensIn,
+                    totalTokensOut: chat.totalTokensOut + tokensOut,
+                    estimatedCost: chat.estimatedCost + costUsd,
+                    updatedAt: new Date(),
+                  })
+                  .where(eq(chats.id, chatId));
+
+                if (history.length <= 1) {
+                  const title =
+                    userMessage.length > 50
+                      ? userMessage.slice(0, 50) + '...'
+                      : userMessage;
+                  await db.update(chats).set({ title }).where(eq(chats.id, chatId));
+                }
+              } catch (err) {
+                console.error('[Chat/Remote] Failed to save message:', err);
+              } finally {
+                markStreamEnd(projectId, chatId);
+                safeClose();
+              }
+            })();
+
+            socket.off('event', onEvent);
+            break;
+          }
+
+          case 'CLAUDE_ERROR': {
+            const errorMessage = event.message as string;
+            safeEnqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({
+                  type: 'error',
+                  message: errorMessage,
+                })}\n\n`,
+              ),
+            );
+
+            // Persist partial content if any
+            (async () => {
+              try {
+                if (fullContent) {
+                  await db.insert(chatMessages).values({
+                    id: assistantMsgId,
+                    chatId,
+                    role: 'assistant',
+                    content: fullContent,
+                    toolUses: JSON.stringify(toolUses),
+                    proposedChanges: '[]',
+                    attachments: '[]',
+                    executionMode: 'remote',
+                    tokensIn,
+                    tokensOut,
+                    timestamp: new Date(),
+                  });
+                }
+              } catch (err) {
+                console.error('[Chat/Remote] Failed to save partial message:', err);
+              } finally {
+                markStreamEnd(projectId, chatId);
+                safeClose();
+              }
+            })();
+
+            socket.off('event', onEvent);
+            break;
+          }
+
+          default:
+            // CLAUDE_STARTED, PROXY_READY — informational, no SSE needed
+            break;
+        }
+      };
+
+      socket.on('event', onEvent);
+
+      // ─── Send the CLAUDE_QUERY command ──────────────────
+      const requestId = nanoid();
+      const command: AgentCommand = {
+        type: 'CLAUDE_QUERY',
+        id: requestId,
+        sessionId,
+        projectPath: project.path,
+        prompt: fullPrompt,
+        ...(systemPrompt ? { systemPrompt } : {}),
+        ...(chat.model ? { model: chat.model } : {}),
+        permissions,
+      };
+      socket.emit('command', command);
+
+      // ─── Client disconnect → cancel on device ──────────
+      request.signal.addEventListener('abort', () => {
+        socket.off('event', onEvent);
+        socket.emit('command', {
+          type: 'CLAUDE_CANCEL',
+          id: nanoid(),
+          sessionId,
+        } satisfies AgentCommand);
+        markStreamEnd(projectId, chatId);
+        safeClose();
+      });
     },
   });
 

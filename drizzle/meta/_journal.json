@@ -22,6 +22,13 @@
       "when": 1777281478560,
       "tag": "0002_tough_kid_colt",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1777291289072,
+      "tag": "0003_add_claude_config",
+      "breakpoints": true
     }
   ]
 }

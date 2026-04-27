@@ -14,6 +14,7 @@ import {
   Center,
   Loader,
   Select,
+  SegmentedControl,
 } from '@mantine/core';
 import {
   IconPlus,
@@ -21,6 +22,8 @@ import {
   IconTrash,
   IconSparkles,
   IconCoins,
+  IconServer,
+  IconCloud,
 } from '@tabler/icons-react';
 import { notify } from '@/lib/notify';
 import { playSound } from '@/lib/audio';
@@ -45,6 +48,7 @@ interface Chat {
   projectId: string;
   title: string;
   model: string;
+  executionMode: 'local' | 'remote';
   totalTokensIn: number;
   totalTokensOut: number;
   estimatedCost: number;
@@ -56,6 +60,7 @@ interface Chat {
 interface ChatPanelProps {
   projectId: string;
   deviceId: string | null;
+  deviceConnected?: boolean;
 }
 
 const MODEL_OPTIONS = [
@@ -84,7 +89,7 @@ function withRemoved(set: Set<string>, key: string): Set<string> {
   return next;
 }
 
-export function ChatPanel({ projectId, deviceId }: ChatPanelProps) {
+export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelProps) {
   const [chatList, setChatList] = useState<Chat[]>([]);
   const [activeChat, setActiveChat] = useState<string | null>(null);
   // Messages are still shown only for the active chat — switching chats
@@ -108,6 +113,8 @@ export function ChatPanel({ projectId, deviceId }: ChatPanelProps) {
   const [toolActivitiesByChat, setToolActivitiesByChat] = useState<Record<string, ToolActivity[]>>({});
   const [respondingTo, setRespondingTo] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL);
+  // Per-chat sessionId for remote cancel/permission round-trips.
+  const [sessionIdsByChat, setSessionIdsByChat] = useState<Record<string, string>>({});
   const scrollRef = useRef<HTMLDivElement>(null);
   // Tracks the chat the user is currently viewing without re-creating the
   // sendMessage closure on every switch. The streaming reader runs for the
@@ -393,7 +400,13 @@ export function ChatPanel({ projectId, deviceId }: ChatPanelProps) {
     // Single place that knows how to interpret a parsed SSE event. Defined
     // up-front so the buffered reader below can call it from one spot.
     const handleEvent = (event: Record<string, unknown>) => {
-      if (event.type === 'text') {
+      if (event.type === 'session_started') {
+        // Remote mode: capture the sessionId for cancel/permission
+        setSessionIdsByChat((prev) => ({
+          ...prev,
+          [chatId]: event.sessionId as string,
+        }));
+      } else if (event.type === 'text') {
         accumulated += event.text as string;
         setStreamingContents((prev) => ({ ...prev, [chatId]: accumulated }));
       } else if (event.type === 'done') {
@@ -409,10 +422,6 @@ export function ChatPanel({ projectId, deviceId }: ChatPanelProps) {
           tokensOut: event.tokensOut as number,
           timestamp: new Date().toISOString(),
         };
-        // Only patch the visible message list when the user is still on the
-        // chat that this stream belongs to. Otherwise the assistant message
-        // would land in whichever chat the user navigated to. The server
-        // persists the message regardless, so a later visit picks it up.
         if (activeChatRef.current === chatId) {
           setMessages((prev) => [...prev, assistantMsg]);
         }
@@ -421,19 +430,24 @@ export function ChatPanel({ projectId, deviceId }: ChatPanelProps) {
           delete next[chatId];
           return next;
         });
+        // Clean up sessionId
+        setSessionIdsByChat((prev) => {
+          const next = { ...prev };
+          delete next[chatId];
+          return next;
+        });
         playSound('taskComplete');
-        // Fire-and-forget: refresh sidebar titles/cost without blocking the
-        // reader loop.
         fetchChats();
       } else if (event.type === 'permission_request') {
         playSound('notification');
+        // Works for both local format (toolUseId) and remote format (requestId)
         const perm: PermissionRequest = {
-          toolUseId: event.toolUseId as string,
+          toolUseId: (event.toolUseId ?? event.requestId) as string,
           toolName: event.toolName as string,
-          displayName: event.displayName as string,
-          category: event.category as PermissionRequest['category'],
+          displayName: (event.displayName ?? event.toolName) as string,
+          category: (event.category ?? 'execute') as PermissionRequest['category'],
           input: event.input as Record<string, unknown>,
-          title: event.title as string,
+          title: (event.title ?? event.reason ?? `${event.toolName}`) as string,
           description: event.description as string | undefined,
           status: 'pending',
         };
@@ -455,11 +469,20 @@ export function ChatPanel({ projectId, deviceId }: ChatPanelProps) {
           [chatId]: [...(prev[chatId] ?? []), activity],
         }));
       } else if (event.type === 'error') {
-        notify({
-          title: 'AI Error',
-          message: event.message as string,
-          color: 'red',
-        });
+        const code = event.code as string | undefined;
+        if (code === 'DEVICE_OFFLINE') {
+          notify({
+            title: 'Device offline',
+            message: 'The device is not connected. Switch to Local mode or wait for device.',
+            color: 'orange',
+          });
+        } else {
+          notify({
+            title: 'AI Error',
+            message: event.message as string,
+            color: 'red',
+          });
+        }
       }
     };
 
@@ -472,7 +495,11 @@ export function ChatPanel({ projectId, deviceId }: ChatPanelProps) {
           // The stream route persists `attachments` on the user message and
           // also weaves the file paths into the prompt so Claude Code's
           // Read tool can inspect them.
-          body: JSON.stringify({ message: content, attachments: attachmentsJson }),
+          body: JSON.stringify({
+            message: content,
+            attachments: attachmentsJson,
+            executionMode: chatList.find((c) => c.id === chatId)?.executionMode ?? 'local',
+          }),
         },
       );
 
@@ -544,21 +571,35 @@ export function ChatPanel({ projectId, deviceId }: ChatPanelProps) {
     }
   };
 
-  // Handle permission approval — sends to /permission endpoint
+  // Handle permission approval — routes to the correct endpoint based on mode
   const approvePermission = async (toolUseId: string) => {
     if (!activeChat) return;
     setRespondingTo(toolUseId);
     const chatId = activeChat;
+    const sessionId = sessionIdsByChat[chatId];
 
     try {
-      await fetch(
-        `/api/projects/${projectId}/chat/${chatId}/permission`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ toolUseId, decision: 'allow' }),
-        },
-      );
+      if (sessionId) {
+        // Remote mode: use /claude/permission with sessionId
+        await fetch(
+          `/api/projects/${projectId}/claude/permission`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sessionId, requestId: toolUseId, decision: 'allow' }),
+          },
+        );
+      } else {
+        // Local mode: use /chat/[chatId]/permission with toolUseId
+        await fetch(
+          `/api/projects/${projectId}/chat/${chatId}/permission`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ toolUseId, decision: 'allow' }),
+          },
+        );
+      }
 
       setPermissionsByChat((prev) => ({
         ...prev,
@@ -580,16 +621,28 @@ export function ChatPanel({ projectId, deviceId }: ChatPanelProps) {
   const denyPermission = async (toolUseId: string) => {
     if (!activeChat) return;
     const chatId = activeChat;
+    const sessionId = sessionIdsByChat[chatId];
 
     try {
-      await fetch(
-        `/api/projects/${projectId}/chat/${chatId}/permission`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ toolUseId, decision: 'deny' }),
-        },
-      );
+      if (sessionId) {
+        await fetch(
+          `/api/projects/${projectId}/claude/permission`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sessionId, requestId: toolUseId, decision: 'deny' }),
+          },
+        );
+      } else {
+        await fetch(
+          `/api/projects/${projectId}/chat/${chatId}/permission`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ toolUseId, decision: 'deny' }),
+          },
+        );
+      }
 
       setPermissionsByChat((prev) => ({
         ...prev,
@@ -831,6 +884,65 @@ export function ChatPanel({ projectId, deviceId }: ChatPanelProps) {
                   },
                 }}
               />
+              {deviceId && (
+                <SegmentedControl
+                  size="xs"
+                  value={activeChatData.executionMode ?? 'local'}
+                  onChange={(val) => {
+                    const mode = val as 'local' | 'remote';
+                    if (activeChat) {
+                      fetch(`/api/projects/${projectId}/chat/${activeChat}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ executionMode: mode }),
+                      });
+                      setChatList((prev) =>
+                        prev.map((c) =>
+                          c.id === activeChat ? { ...c, executionMode: mode } : c,
+                        ),
+                      );
+                    }
+                  }}
+                  data={[
+                    {
+                      value: 'local',
+                      label: (
+                        <Group gap={4} wrap="nowrap">
+                          <IconServer size={12} />
+                          <span>Local</span>
+                        </Group>
+                      ),
+                    },
+                    {
+                      value: 'remote',
+                      label: (
+                        <Group gap={4} wrap="nowrap">
+                          <IconCloud size={12} />
+                          <span>On device</span>
+                          {deviceConnected !== undefined && (
+                            <Box
+                              style={{
+                                width: 6,
+                                height: 6,
+                                borderRadius: '50%',
+                                backgroundColor: deviceConnected
+                                  ? 'var(--mantine-color-green-5)'
+                                  : 'var(--mantine-color-red-5)',
+                              }}
+                            />
+                          )}
+                        </Group>
+                      ),
+                    },
+                  ]}
+                  styles={{
+                    root: {
+                      backgroundColor: 'var(--mantine-color-dark-7)',
+                      border: '1px solid var(--mantine-color-dark-5)',
+                    },
+                  }}
+                />
+              )}
               {activeChatData.estimatedCost > 0 && (
                 <Badge
                   size="xs"
