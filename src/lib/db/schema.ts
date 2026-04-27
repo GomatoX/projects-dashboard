@@ -277,3 +277,65 @@ export const soundSettings = sqliteTable('sound_settings', {
   quietHoursEnd: text('quiet_hours_end').default('08:00'),
   events: text('events').notNull().default('{}'),
 });
+
+// ─── Chat Stream Journals ─────────────────────────────────
+//
+// Per-chat record of a streaming "turn" (user message + agent response).
+// Created in 'active' status when POST /stream begins, transitions to
+// 'ended' when the turn finishes naturally — or when boot-time
+// `crashRecovery()` seals an orphaned journal whose owning agent died
+// with the previous Next.js process.
+//
+// One active journal per chatId at a time (PRIMARY KEY on chat_id, plus
+// the in-memory `markStreamStart` guard that returns false on duplicate
+// starts so the route can answer HTTP 409).
+//
+// `next_seq` mirrors the in-memory counter while the journal is active and
+// is synced on endJournal so a post-restart caller can still order events
+// correctly. `events` are stored separately in `chat_stream_events`.
+export const chatStreamJournals = sqliteTable('chat_stream_journals', {
+  chatId: text('chat_id')
+    .primaryKey()
+    .references(() => chats.id, { onDelete: 'cascade' }),
+  status: text('status', { enum: ['active', 'ended'] }).notNull(),
+  startedAt: integer('started_at', { mode: 'timestamp' }).notNull(),
+  endedAt: integer('ended_at', { mode: 'timestamp' }),
+  // Highest seq + 1 for the next event. Authoritative while active is
+  // the in-memory counter; this column is synced on endJournal so a
+  // post-restart reader still has a correct latestSeq.
+  nextSeq: integer('next_seq').notNull().default(1),
+});
+
+// ─── Chat Stream Events ───────────────────────────────────
+//
+// Individual SSE events captured during a chat turn. Append-only.
+// `seq` is a per-chat monotonic sequence (1-indexed) so subscribers can
+// dedupe and resume via the SSE Last-Event-ID header / `?since=` query.
+//
+// `data` holds the raw JSON payload (no `data: ` SSE prefix); the
+// subscribe endpoint re-frames it consistently.
+//
+// Cascades on chat delete so dropping a chat also drops its journal log.
+export const chatStreamEvents = sqliteTable(
+  'chat_stream_events',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    chatId: text('chat_id')
+      .notNull()
+      .references(() => chatStreamJournals.chatId, { onDelete: 'cascade' }),
+    seq: integer('seq').notNull(),
+    data: text('data').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (t) => ({
+    // Hot path: `WHERE chat_id=? AND seq > ? ORDER BY seq ASC` (snapshot
+    // replay). Uniqueness also acts as a safety net against a double-
+    // append for the same logical event.
+    chatIdSeqIdx: uniqueIndex('chat_stream_events_chat_id_seq_idx').on(
+      t.chatId,
+      t.seq,
+    ),
+  }),
+);
