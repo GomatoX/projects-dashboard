@@ -231,16 +231,17 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
         return;
       }
       if (event.type === 'text') {
-        // begin() is idempotent if already active; ensures we initialise
-        // empty content even if we joined mid-turn.
-        const cur = streaming.get(chatId);
-        if (!cur.active) streaming.begin(chatId);
+        // The reattach effect calls `streaming.begin(chatId)` once before
+        // pumping events into us, so by the time we get here the slice is
+        // already active. We deliberately do NOT read `streaming.get` —
+        // this callback's `streaming` is captured at mount and `get` is a
+        // closure over a stale `byChat`, which would always return
+        // EMPTY_STATE and trigger a content-wiping `begin()` on every
+        // delta.
         streaming.appendText(chatId, event.text as string);
         return;
       }
       if (event.type === 'turn_break') {
-        const cur = streaming.get(chatId);
-        if (!cur.active) streaming.begin(chatId);
         streaming.appendTurnBreak(chatId);
         return;
       }
@@ -327,6 +328,13 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
           // 404 == no longer active — the polling effect will catch the new state
           return;
         }
+
+        // Initialise the streaming slice ONCE up front so handleSubscribedEvent
+        // can append without checking `cur.active` (that check would read a
+        // stale `byChat` snapshot captured at effect mount and trigger a
+        // content-wiping reset on every delta — see the comment in
+        // handleSubscribedEvent).
+        streaming.begin(chatId);
 
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
@@ -749,6 +757,24 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
         // "stopping failed" message would be more confusing than helpful.
       }
 
+      // The client-side fetch was torn down in step (1), so the original
+      // sendMessage SSE reader will never see the server's `done` event
+      // — and therefore never refetches /messages to swap the live bubble
+      // for the persisted assistant row. Do it explicitly here. The
+      // server's catch → persist → finally chain runs after the
+      // AbortController flip, so we wait briefly to give the row a
+      // chance to land in SQLite. A second pass at ~1.6s covers the
+      // remote path (which takes an extra Socket.io round-trip) and any
+      // case where the first pass raced ahead of the insert.
+      setTimeout(() => {
+        fetchMessages(chatId).finally(() => {
+          streaming.clear(chatId);
+        });
+      }, 600);
+      setTimeout(() => {
+        fetchMessages(chatId);
+      }, 1600);
+
       // Local-streamed turns: the sendMessage `finally` will clear the
       // `cancellingChats` entry as part of its own cleanup. Server-side
       // / reattach turns (where sendMessage isn't running in this tab):
@@ -762,7 +788,7 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
         setCancellingChats((prev) => withRemoved(prev, chatId));
       }, 4000);
     },
-    [cancellingChats, projectId, streaming],
+    [cancellingChats, projectId, streaming, fetchMessages],
   );
 
   // Handle permission approval — routes to the correct endpoint based on mode
