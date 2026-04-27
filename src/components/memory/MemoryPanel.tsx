@@ -220,7 +220,7 @@ export function MemoryPanel({ projectId }: MemoryPanelProps) {
                   Custom instructions prepended to every AI conversation
                 </Text>
               </div>
-              <Badge size="xs" variant="outline" color="dark.3">
+              <Badge size="xs" variant="outline" color="gray">
                 ~{estimateTokens(memory.systemPrompt)} tokens
               </Badge>
             </Group>
@@ -254,7 +254,7 @@ export function MemoryPanel({ projectId }: MemoryPanelProps) {
                   Style guides, naming patterns, and project-specific rules
                 </Text>
               </div>
-              <Badge size="xs" variant="outline" color="dark.3">
+              <Badge size="xs" variant="outline" color="gray">
                 ~{estimateTokens(memory.conventions)} tokens
               </Badge>
             </Group>
@@ -288,7 +288,7 @@ export function MemoryPanel({ projectId }: MemoryPanelProps) {
                   Tech stack, folder structure, database schema, key patterns
                 </Text>
               </div>
-              <Badge size="xs" variant="outline" color="dark.3">
+              <Badge size="xs" variant="outline" color="gray">
                 ~{estimateTokens(memory.architecture)} tokens
               </Badge>
             </Group>
@@ -322,7 +322,7 @@ export function MemoryPanel({ projectId }: MemoryPanelProps) {
                   TODOs, known issues, important context for the AI
                 </Text>
               </div>
-              <Badge size="xs" variant="outline" color="dark.3">
+              <Badge size="xs" variant="outline" color="gray">
                 ~{estimateTokens(memory.notes)} tokens
               </Badge>
             </Group>

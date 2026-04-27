@@ -29,7 +29,10 @@ export const metadata: Metadata = {
 };
 
 export const viewport = {
-  themeColor: '#0dc5d9',
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#ffffff' },
+    { media: '(prefers-color-scheme: dark)', color: '#0c0d1a' },
+  ],
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
@@ -38,12 +41,12 @@ export const viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" data-mantine-color-scheme="dark" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning>
       <head>
-        <ColorSchemeScript defaultColorScheme="dark" />
+        <ColorSchemeScript defaultColorScheme="auto" />
       </head>
       <body>
-        <MantineProvider theme={theme} defaultColorScheme="dark">
+        <MantineProvider theme={theme} defaultColorScheme="auto">
           <ModalsProvider>
             <Notifications position="top-right" zIndex={1000} />
             {children}

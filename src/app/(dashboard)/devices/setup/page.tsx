@@ -316,7 +316,7 @@ PROJECT_PATHS=$HOME/projects,$HOME/Desktop/Projects`}
               </Text>
             </Group>
 
-            <Divider label="macOS (launchd)" labelPosition="left" color="dark.5" />
+            <Divider label="macOS (launchd)" labelPosition="left" />
             <CopyBlock
               code={`# View logs
 tail -f ~/.dev-dashboard-agent/agent.log
@@ -333,7 +333,7 @@ rm -rf ~/.dev-dashboard-agent
 rm ~/Library/LaunchAgents/com.devdashboard.agent.plist`}
             />
 
-            <Divider label="Linux (systemd)" labelPosition="left" color="dark.5" />
+            <Divider label="Linux (systemd)" labelPosition="left" />
             <CopyBlock
               code={`# View logs
 journalctl --user -u dev-dashboard-agent -f

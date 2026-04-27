@@ -256,7 +256,7 @@ export function PRDetailDrawer({
                         {summary.complexity} complexity
                       </Badge>
                       {summary.categories?.map((c) => (
-                        <Badge key={c} size="xs" variant="outline" color="dark.3">
+                        <Badge key={c} size="xs" variant="outline" color="gray">
                           {c}
                         </Badge>
                       ))}

@@ -108,7 +108,7 @@ export function ProjectCard({
         {parsedTags.length > 0 && (
           <Group gap={4}>
             {parsedTags.map((tag) => (
-              <Badge key={tag} size="xs" variant="filled" color="dark.5">
+              <Badge key={tag} size="xs" variant="filled" color="gray">
                 {tag}
               </Badge>
             ))}

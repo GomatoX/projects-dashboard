@@ -153,7 +153,7 @@ export function ToolApprovalCard({
         );
       case 'auto':
         return (
-          <Badge size="xs" variant="light" color="dark.4">
+          <Badge size="xs" variant="light" color="gray">
             Auto
           </Badge>
         );

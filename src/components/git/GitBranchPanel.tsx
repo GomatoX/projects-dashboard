@@ -213,7 +213,7 @@ export function GitBranchPanel({
                 <Badge
                   size="xs"
                   variant="outline"
-                  color="dark.3"
+                  color="gray"
                   style={{ fontFamily: 'monospace' }}
                 >
                   {branch.commit?.slice(0, 7)}
@@ -260,7 +260,7 @@ export function GitBranchPanel({
             <IconCloud size={14} style={{ opacity: 0.4 }} />
           </Group>
           <Group gap="xs">
-            <Badge size="sm" variant="outline" color="dark.3">
+            <Badge size="sm" variant="outline" color="gray">
               {remoteBranches.length}
             </Badge>
             <Button size="compact-xs" variant="subtle" color="brand" onClick={handleFetch}>
@@ -280,7 +280,7 @@ export function GitBranchPanel({
                 <Badge
                   size="xs"
                   variant="outline"
-                  color="dark.4"
+                  color="gray"
                   ml="auto"
                   style={{ fontFamily: 'monospace' }}
                 >

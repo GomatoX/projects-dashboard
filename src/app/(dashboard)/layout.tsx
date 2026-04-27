@@ -7,6 +7,7 @@ import { useDisclosure, useMediaQuery } from '@mantine/hooks';
 import { SpotlightProvider } from '@/components/shell/SpotlightProvider';
 import { Header } from '@/components/shell/Header';
 import { Sidebar } from '@/components/shell/Sidebar';
+import { ActiveTitleUpdater } from '@/components/shell/ActiveTitleUpdater';
 import { loadSoundSettings } from '@/lib/audio';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -32,6 +33,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   return (
     <SpotlightProvider>
+      <ActiveTitleUpdater />
       <AppShell
         header={{ height: 60 }}
         navbar={{
@@ -42,17 +44,22 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         padding="lg"
         styles={{
           main: {
-            backgroundColor: 'var(--mantine-color-dark-9)',
+            backgroundColor:
+              'light-dark(#f6f8fa, var(--mantine-color-dark-9))',
             minHeight: '100vh',
           },
           header: {
-            backgroundColor: 'var(--mantine-color-dark-8)',
-            borderBottom: '1px solid var(--mantine-color-dark-5)',
+            backgroundColor:
+              'light-dark(var(--mantine-color-white), var(--mantine-color-dark-8))',
+            borderBottom:
+              '1px solid light-dark(var(--mantine-color-gray-3), var(--mantine-color-dark-5))',
             backdropFilter: 'blur(16px)',
           },
           navbar: {
-            backgroundColor: 'var(--mantine-color-dark-8)',
-            borderRight: '1px solid var(--mantine-color-dark-5)',
+            backgroundColor:
+              'light-dark(var(--mantine-color-white), var(--mantine-color-dark-8))',
+            borderRight:
+              '1px solid light-dark(var(--mantine-color-gray-3), var(--mantine-color-dark-5))',
           },
         }}
       >

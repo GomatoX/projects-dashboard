@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import path from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import type {
   SDKMessage,
@@ -14,15 +15,42 @@ import { shouldAutoAllow, getToolMeta } from '@/lib/ai/tools';
 import { createPermissionRequest } from '@/lib/ai/permission-store';
 import { markStreamStart, markStreamEnd } from '@/lib/ai/active-streams';
 
+// Shape of the metadata POST /attachments returns. Matches what the client
+// stores on the user message and what we read back here when building the
+// prompt note that points Claude at the on-disk files.
+interface AttachmentMeta {
+  id: string;
+  filename: string;
+  name: string;
+  type: string;
+  size: number;
+  url: string;
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; chatId: string }> },
 ) {
   const { id: projectId, chatId } = await params;
   const body = await request.json();
-  const userMessage: string = body.message;
+  const userMessage: string = body.message ?? '';
 
-  if (!userMessage?.trim()) {
+  // `attachments` arrives as a JSON-encoded string (the same blob we persist
+  // on chatMessages.attachments). Parse defensively — a bad payload should
+  // not block the message, just drop the attachments.
+  let attachments: AttachmentMeta[] = [];
+  if (typeof body.attachments === 'string' && body.attachments) {
+    try {
+      const parsed = JSON.parse(body.attachments);
+      if (Array.isArray(parsed)) attachments = parsed as AttachmentMeta[];
+    } catch {
+      // ignore — treat as no attachments
+    }
+  }
+
+  // A turn is valid if there's text OR at least one attachment (e.g. a
+  // screenshot pasted with no caption is still a meaningful prompt).
+  if (!userMessage.trim() && attachments.length === 0) {
     return new Response(JSON.stringify({ error: 'Message is required' }), {
       status: 400,
       headers: { 'Content-Type': 'application/json' },
@@ -100,9 +128,40 @@ export async function POST(
     .map((msg) => `${msg.role === 'user' ? 'Human' : 'Assistant'}: ${msg.content}`)
     .join('\n\n');
 
+  // If the user attached files, surface them to the agent as absolute paths
+  // on disk. The agent runs through the Claude Code CLI, whose built-in Read
+  // tool is multimodal — pointing it at an image/PDF path is enough for the
+  // model to "see" the contents. We deliberately do NOT inline the bytes
+  // (no base64 in the prompt) because that would balloon token usage and
+  // duplicate work the Read tool already does optimally.
+  //
+  // Paths are resolved against the Next server's cwd (where data/uploads
+  // lives), not the project's cwd that the agent is launched in — the
+  // absolute path makes the difference irrelevant to the agent.
+  let attachmentNote = '';
+  if (attachments.length > 0) {
+    const lines = attachments.map((a) => {
+      const abs = path.join(
+        process.cwd(),
+        'data',
+        'uploads',
+        'chats',
+        chatId,
+        a.filename,
+      );
+      return `- ${a.name} (${a.type}) → ${abs}`;
+    });
+    attachmentNote =
+      `\n\n[The user attached ${attachments.length} file(s). ` +
+      `Use the Read tool on the absolute paths below to inspect them — ` +
+      `images and PDFs are rendered visually.]\n` +
+      lines.join('\n');
+  }
+
+  const userTurn = `${userMessage}${attachmentNote}`;
   const fullPrompt = historyContext
-    ? `Previous conversation:\n${historyContext}\n\nHuman: ${userMessage}`
-    : userMessage;
+    ? `Previous conversation:\n${historyContext}\n\nHuman: ${userTurn}`
+    : userTurn;
 
   // Stream response
   const encoder = new TextEncoder();

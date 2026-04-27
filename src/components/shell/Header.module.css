@@ -8,19 +8,23 @@
   background: linear-gradient(135deg, rgba(13, 197, 217, 0.15), rgba(13, 197, 217, 0.05));
 }
 
+[data-mantine-color-scheme='light'] .logo {
+  background: linear-gradient(135deg, rgba(0, 154, 171, 0.18), rgba(0, 154, 171, 0.06));
+}
+
 .searchTrigger {
   display: flex;
   align-items: center;
   padding: 6px 12px;
   border-radius: var(--mantine-radius-md);
-  border: 1px solid var(--mantine-color-dark-4);
-  background: var(--mantine-color-dark-7);
+  border: 1px solid light-dark(var(--mantine-color-gray-3), var(--mantine-color-dark-4));
+  background: light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-7));
   transition: all var(--transition-fast);
   cursor: pointer;
   min-width: 60px;
 }
 
 .searchTrigger:hover {
-  border-color: var(--mantine-color-dark-3);
-  background: var(--mantine-color-dark-6);
+  border-color: light-dark(var(--mantine-color-gray-4), var(--mantine-color-dark-3));
+  background: light-dark(var(--mantine-color-gray-1), var(--mantine-color-dark-6));
 }

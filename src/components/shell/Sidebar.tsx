@@ -107,7 +107,7 @@ export function Sidebar({ pathname, onNavigate }: SidebarProps) {
           />
         ))}
 
-        <Divider my="sm" color="dark.5" />
+        <Divider my="sm" />
 
         {/* Projects quick access */}
         <Group px="sm" py="xs" justify="space-between">
@@ -115,7 +115,7 @@ export function Sidebar({ pathname, onNavigate }: SidebarProps) {
             Projects
           </Text>
           {projects.length > 0 && (
-            <Badge size="xs" variant="light" color="dark.3">
+            <Badge size="xs" variant="light" color="gray">
               {projects.length}
             </Badge>
           )}
@@ -188,7 +188,7 @@ export function Sidebar({ pathname, onNavigate }: SidebarProps) {
           </Stack>
         </ScrollArea>
 
-        <Divider my="sm" color="dark.5" />
+        <Divider my="sm" />
 
         <NavLink
           component={Link}
@@ -241,7 +241,7 @@ export function Sidebar({ pathname, onNavigate }: SidebarProps) {
 
       {/* Status Footer */}
       <Box className={classes.statusFooter}>
-        <Divider mb="sm" color="dark.5" />
+        <Divider mb="sm" />
         <Group gap="xs" px="sm" py="xs">
           <IconActivity size={14} style={{ opacity: 0.5 }} />
           <Text size="xs" c="dimmed">

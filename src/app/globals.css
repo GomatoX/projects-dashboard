@@ -6,8 +6,57 @@
   --glass-border: rgba(255, 255, 255, 0.12);
   --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   --glow-brand: 0 0 20px rgba(13, 197, 217, 0.2);
+  --grid-dot-color: rgba(255, 255, 255, 0.03);
+  --selection-bg: rgba(13, 197, 217, 0.3);
+  --selection-color: #fff;
   --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
   --transition-smooth: 300ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ─── Light-mode override: remap brand-tinted dark palette to a
+       layered light-mode gray scale. Sidebar/header are pure white and
+       sit flush with cards; the body is a soft off-white that lets the
+       white surfaces "lift" off the page. Doing the remap at the CSS
+       variable level lets every existing `var(--mantine-color-dark-X)`
+       reference keep working in both schemes without touching components. */
+[data-mantine-color-scheme='light'] {
+  /* Inverted tone mapping — index 0 was lightest in dark scheme (text on
+     dark bg), so in light scheme it must become the darkest color
+     (text on light bg). */
+  --mantine-color-dark-0: #1a1b1e; /* primary text */
+  --mantine-color-dark-1: #495057; /* secondary text */
+  --mantine-color-dark-2: #6c757d; /* muted text */
+  --mantine-color-dark-3: #adb5bd; /* subtle / outline borders */
+  --mantine-color-dark-4: #dee2e6; /* card borders */
+  --mantine-color-dark-5: #e9ecef; /* input borders / dividers */
+  --mantine-color-dark-6: #f1f3f5; /* card hover bg */
+  --mantine-color-dark-7: #ffffff; /* card / surface bg */
+  --mantine-color-dark-8: #ffffff; /* sidebar / header bg */
+  --mantine-color-dark-9: #f6f8fa; /* main / page bg (subtle off-white) */
+
+  /* Decorative tokens */
+  --glass-bg: rgba(255, 255, 255, 0.7);
+  --glass-border: rgba(0, 0, 0, 0.08);
+  --glass-shadow: 0 8px 32px rgba(15, 23, 42, 0.08);
+  --glow-brand: 0 0 20px rgba(0, 154, 171, 0.18);
+  --grid-dot-color: rgba(0, 0, 0, 0.04);
+  --selection-bg: rgba(0, 154, 171, 0.22);
+  --selection-color: #003d44;
+}
+
+/* Add a subtle drop shadow + crisp border to Cards in light mode so they
+   visually separate from the off-white body background. */
+[data-mantine-color-scheme='light'] .mantine-Card-root {
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.03);
+}
+
+/* Right border on sidebar / bottom border on header in light mode so the
+   white-on-white surfaces still have a visible edge. */
+[data-mantine-color-scheme='light'] .mantine-AppShell-navbar {
+  border-right-color: var(--mantine-color-dark-4) !important;
+}
+[data-mantine-color-scheme='light'] .mantine-AppShell-header {
+  border-bottom-color: var(--mantine-color-dark-4) !important;
 }
 
 /* ─── Global Resets ─────────────────────────────────────── */
@@ -40,6 +89,11 @@ code {
   font-size: 0.875em;
 }
 
+[data-mantine-color-scheme='light'] code {
+  /* Brand-3 is too light against off-white; use deeper shade instead. */
+  color: var(--mantine-color-brand-8);
+}
+
 /* ─── Override Mantine dimmed to be brighter ────────────── */
 .mantine-Text-root[data-c='dimmed'] {
   color: var(--mantine-color-dark-1) !important;
@@ -47,8 +101,8 @@ code {
 
 /* ─── Selection ─────────────────────────────────────────── */
 ::selection {
-  background-color: rgba(13, 197, 217, 0.3);
-  color: #fff;
+  background-color: var(--selection-bg);
+  color: var(--selection-color);
 }
 
 /* ─── Scrollbar ─────────────────────────────────────────── */
@@ -124,7 +178,7 @@ code {
   position: fixed;
   inset: 0;
   z-index: -1;
-  background-image: radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.03) 1px, transparent 0);
+  background-image: radial-gradient(circle at 1px 1px, var(--grid-dot-color) 1px, transparent 0);
   background-size: 40px 40px;
   pointer-events: none;
 }

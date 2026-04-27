@@ -131,7 +131,7 @@ export function GitPanel({ projectId, projectPath, deviceId }: GitPanelProps) {
           value="branches"
           leftSection={<IconGitBranch size={16} />}
           rightSection={
-            <Badge size="xs" variant="outline" color="dark.3">
+            <Badge size="xs" variant="outline" color="gray">
               {branches.filter((b) => !b.name.startsWith('remotes/')).length}
             </Badge>
           }

@@ -18,6 +18,7 @@ import {
   IconDeviceFloppy,
 } from '@tabler/icons-react';
 import { SoundSettings } from '@/components/settings/SoundSettings';
+import { AppearanceSettings } from '@/components/settings/AppearanceSettings';
 
 export default function SettingsPage() {
   return (
@@ -86,6 +87,9 @@ export default function SettingsPage() {
             </Text>
           </Stack>
         </Card>
+
+        {/* Appearance */}
+        <AppearanceSettings />
 
         {/* Sound Settings */}
         <SoundSettings />

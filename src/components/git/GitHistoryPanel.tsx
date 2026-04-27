@@ -94,7 +94,7 @@ export function GitHistoryPanel({ entries, currentBranch, onRefresh }: GitHistor
                       <Badge
                         size="xs"
                         variant="outline"
-                        color="dark.3"
+                        color="gray"
                         style={{ fontFamily: 'monospace' }}
                       >
                         {entry.hashShort}

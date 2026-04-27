@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1777279856049,
+      "tag": "0000_tidy_dagger",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1777280255488,
+      "tag": "0001_tidy_purifiers",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1777281478560,
+      "tag": "0002_tough_kid_colt",
+      "breakpoints": true
+    }
+  ]
+}

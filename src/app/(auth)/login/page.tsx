@@ -148,7 +148,7 @@ function LoginForm() {
             </Stack>
           </form>
 
-          <Divider my="lg" label="or" labelPosition="center" color="dark.4" />
+          <Divider my="lg" label="or" labelPosition="center" />
 
           <Button
             variant="subtle"

@@ -226,7 +226,7 @@ export default function PM2Page() {
                   <IconServer size={14} />
                 </ThemeIcon>
                 <Text fw={600}>{dp.deviceName}</Text>
-                <Badge size="sm" variant="outline" color="dark.3">
+                <Badge size="sm" variant="outline" color="gray">
                   {dp.processes.length} process{dp.processes.length !== 1 ? 'es' : ''}
                 </Badge>
               </Group>

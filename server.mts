@@ -4,7 +4,10 @@ import { Server as SocketIOServer } from 'socket.io';
 import bcrypt from 'bcrypt';
 
 const dev = process.env.NODE_ENV !== 'production';
-const hostname = process.env.HOST || (dev ? '127.0.0.1' : '0.0.0.0');
+// Bind to 0.0.0.0 by default — this dashboard is intended to run on a LAN
+// server and be reachable from other devices on the local network.
+// Override with HOST=127.0.0.1 if you want loopback-only access.
+const hostname = process.env.HOST || '0.0.0.0';
 const port = parseInt(process.env.PORT || '3000', 10);
 
 const app = next({ dev, hostname, port });

@@ -18,8 +18,16 @@ const brand: MantineColorsTuple = [
 
 export const theme = createTheme({
   primaryColor: 'brand',
+  // Brand naudoja gilesnį atspalvį šviesoje temoje (WCAG AA kontrastui),
+  // o tamsoje lieka ryškus #0dc5d9.
+  primaryShade: { light: 8, dark: 6 },
+  // Automatiškai parenka baltą/juodą tekstą filled spalvoms pagal kontrastą.
+  autoContrast: true,
   colors: {
     brand,
+    // Brand-tinted dark palette — naudojama tamsoje temoje.
+    // Light temoje šie kintamieji yra perrašomi į gray skalę globals.css faile,
+    // kad esamos `var(--mantine-color-dark-X)` referencijos veiktų abiejose temose.
     dark: [
       '#d5d7e0', // 0 — primary text (brighter)
       '#acaebf', // 1 — secondary text (much brighter)
@@ -56,8 +64,10 @@ export const theme = createTheme({
       },
       styles: {
         root: {
-          backgroundColor: 'var(--mantine-color-dark-7)',
-          borderColor: 'var(--mantine-color-dark-4)',
+          backgroundColor:
+            'light-dark(var(--mantine-color-white), var(--mantine-color-dark-7))',
+          borderColor:
+            'light-dark(var(--mantine-color-gray-3), var(--mantine-color-dark-4))',
         },
       },
     },
@@ -82,8 +92,10 @@ export const theme = createTheme({
       },
       styles: {
         input: {
-          backgroundColor: 'var(--mantine-color-dark-6)',
-          borderColor: 'var(--mantine-color-dark-4)',
+          backgroundColor:
+            'light-dark(var(--mantine-color-white), var(--mantine-color-dark-6))',
+          borderColor:
+            'light-dark(var(--mantine-color-gray-3), var(--mantine-color-dark-4))',
         },
       },
     },
@@ -93,8 +105,10 @@ export const theme = createTheme({
       },
       styles: {
         input: {
-          backgroundColor: 'var(--mantine-color-dark-6)',
-          borderColor: 'var(--mantine-color-dark-4)',
+          backgroundColor:
+            'light-dark(var(--mantine-color-white), var(--mantine-color-dark-6))',
+          borderColor:
+            'light-dark(var(--mantine-color-gray-3), var(--mantine-color-dark-4))',
         },
       },
     },
@@ -104,8 +118,10 @@ export const theme = createTheme({
       },
       styles: {
         input: {
-          backgroundColor: 'var(--mantine-color-dark-6)',
-          borderColor: 'var(--mantine-color-dark-4)',
+          backgroundColor:
+            'light-dark(var(--mantine-color-white), var(--mantine-color-dark-6))',
+          borderColor:
+            'light-dark(var(--mantine-color-gray-3), var(--mantine-color-dark-4))',
         },
       },
     },
@@ -115,8 +131,10 @@ export const theme = createTheme({
       },
       styles: {
         input: {
-          backgroundColor: 'var(--mantine-color-dark-6)',
-          borderColor: 'var(--mantine-color-dark-4)',
+          backgroundColor:
+            'light-dark(var(--mantine-color-white), var(--mantine-color-dark-6))',
+          borderColor:
+            'light-dark(var(--mantine-color-gray-3), var(--mantine-color-dark-4))',
         },
       },
     },
@@ -126,8 +144,10 @@ export const theme = createTheme({
       },
       styles: {
         input: {
-          backgroundColor: 'var(--mantine-color-dark-6)',
-          borderColor: 'var(--mantine-color-dark-4)',
+          backgroundColor:
+            'light-dark(var(--mantine-color-white), var(--mantine-color-dark-6))',
+          borderColor:
+            'light-dark(var(--mantine-color-gray-3), var(--mantine-color-dark-4))',
         },
       },
     },
@@ -140,13 +160,14 @@ export const theme = createTheme({
     NavLink: {
       styles: {
         label: {
-          color: 'var(--mantine-color-dark-0)',
+          color:
+            'light-dark(var(--mantine-color-gray-9), var(--mantine-color-dark-0))',
         },
       },
     },
     Divider: {
       defaultProps: {
-        color: 'dark.4',
+        color: 'gray.3',
       },
     },
   },

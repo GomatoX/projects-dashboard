@@ -25,7 +25,19 @@ import {
 import { notify } from '@/lib/notify';
 import { playSound } from '@/lib/audio';
 import { ChatMessage, type ChatMsg } from './ChatMessage';
-import { ChatInput } from './ChatInput';
+import { ChatInput, type PendingAttachment } from './ChatInput';
+
+// Server-side metadata returned by POST /attachments after the file lands
+// on disk. This is the exact shape persisted into chatMessages.attachments
+// (as JSON) and what ChatMessage renders thumbnails from.
+interface UploadedAttachment {
+  id: string;
+  filename: string;
+  name: string;
+  type: string;
+  size: number;
+  url: string;
+}
 import { ToolApprovalCard, ToolActivityBadge, type PermissionRequest, type ToolActivity } from './ToolApprovalCard';
 
 interface Chat {
@@ -304,7 +316,18 @@ export function ChatPanel({ projectId, deviceId }: ChatPanelProps) {
   // Send message with streaming. Multiple invocations can be in flight in
   // parallel — one per chat — and they share no mutable state besides the
   // per-chat maps in React state.
-  const sendMessage = async (content: string) => {
+  //
+  // Attachment flow: any pending files are uploaded to disk *first* via
+  // POST /attachments, which returns durable metadata (id, url, size, …).
+  // That metadata is what we both (a) persist with the user message via the
+  // stream route's `attachments` field and (b) render as thumbnails in chat
+  // history. The raw `File` objects never reach the stream route — by the
+  // time we hit /stream, the bytes already live on disk and we just pass
+  // along URLs the agent (and the UI) can read back.
+  const sendMessage = async (
+    content: string,
+    pending: PendingAttachment[] = [],
+  ) => {
     if (!activeChat) return;
     // Per-chat guard: a chat that is already streaming (locally or on the
     // server) cannot accept another turn until it finishes. Other chats are
@@ -317,7 +340,38 @@ export function ChatPanel({ projectId, deviceId }: ChatPanelProps) {
     // happens to be active when the event arrives.
     const chatId = activeChat;
 
-    // Optimistic add user message
+    // Step 1: persist any attachments to disk before kicking off the stream.
+    // We do this synchronously (well, awaited) rather than fire-and-forget
+    // so the user message we save below already references real, fetchable
+    // URLs — there is no window where history shows broken thumbnails.
+    let uploaded: UploadedAttachment[] = [];
+    if (pending.length > 0) {
+      try {
+        const fd = new FormData();
+        for (const att of pending) {
+          fd.append('files', att.file, att.file.name);
+        }
+        const res = await fetch(
+          `/api/projects/${projectId}/chat/${chatId}/attachments`,
+          { method: 'POST', body: fd },
+        );
+        if (!res.ok) throw new Error('upload failed');
+        const data = await res.json();
+        uploaded = data.attachments ?? [];
+      } catch {
+        notify({
+          title: 'Upload failed',
+          message: 'Could not upload attachments — message not sent.',
+          color: 'red',
+        });
+        return;
+      }
+    }
+
+    // Optimistic add user message — include the uploaded metadata so the
+    // bubble shows thumbnails the moment it appears, before the stream even
+    // starts. The server saves the same JSON when it persists the user row.
+    const attachmentsJson = JSON.stringify(uploaded);
     const userMsg: ChatMsg = {
       id: `temp-${Date.now()}`,
       chatId,
@@ -325,7 +379,7 @@ export function ChatPanel({ projectId, deviceId }: ChatPanelProps) {
       content,
       toolUses: '[]',
       proposedChanges: '[]',
-      attachments: '[]',
+      attachments: attachmentsJson,
       timestamp: new Date().toISOString(),
     };
     if (activeChatRef.current === chatId) {
@@ -415,7 +469,10 @@ export function ChatPanel({ projectId, deviceId }: ChatPanelProps) {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: content }),
+          // The stream route persists `attachments` on the user message and
+          // also weaves the file paths into the prompt so Claude Code's
+          // Read tool can inspect them.
+          body: JSON.stringify({ message: content, attachments: attachmentsJson }),
         },
       );
 

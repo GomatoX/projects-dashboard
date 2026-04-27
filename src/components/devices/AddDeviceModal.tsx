@@ -323,7 +323,7 @@ pnpm install && pnpm dev`}</Code>
                           {project.detectedFramework || project.type}
                         </Badge>
                         {project.hasGit && (
-                          <Badge size="xs" variant="outline" color="dark.3">
+                          <Badge size="xs" variant="outline" color="gray">
                             git
                           </Badge>
                         )}

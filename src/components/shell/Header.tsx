@@ -19,6 +19,7 @@ import {
 } from '@tabler/icons-react';
 import { authClient } from '@/lib/auth-client';
 import { useRouter } from 'next/navigation';
+import { ThemeToggleMenuItems } from './ThemeToggle';
 import classes from './Header.module.css';
 
 interface HeaderProps {
@@ -68,7 +69,7 @@ export function Header({ opened, toggle }: HeaderProps) {
             </Text>
             <Badge
               variant="outline"
-              color="dark.3"
+              color="gray"
               size="sm"
               radius="sm"
               visibleFrom="sm"
@@ -104,6 +105,8 @@ export function Header({ opened, toggle }: HeaderProps) {
             >
               Settings
             </Menu.Item>
+            <Menu.Divider />
+            <ThemeToggleMenuItems />
             <Menu.Divider />
             <Menu.Item
               color="red"

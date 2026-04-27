@@ -293,7 +293,7 @@ function ConversationTurnCard({ turn }: { turn: ConversationTurn }) {
           {isUser ? 'You' : 'Claude'}
         </Text>
         {turn.model && !isUser && (
-          <Badge size="xs" variant="outline" color="dark.3">
+          <Badge size="xs" variant="outline" color="gray">
             {turn.model}
           </Badge>
         )}

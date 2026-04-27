@@ -141,7 +141,7 @@ export default function ProjectDetailPage() {
           </Badge>
         )}
         {parsedTags.map((tag) => (
-          <Badge key={tag} size="md" variant="filled" color="dark.5">
+          <Badge key={tag} size="md" variant="filled" color="gray">
             {tag}
           </Badge>
         ))}
@@ -225,7 +225,7 @@ export default function ProjectDetailPage() {
                   <Badge
                     size="lg"
                     variant="outline"
-                    color="dark.3"
+                    color="gray"
                     leftSection={<IconGitBranch size={14} />}
                   >
                     Sprint 4.5
@@ -233,7 +233,7 @@ export default function ProjectDetailPage() {
                   <Badge
                     size="lg"
                     variant="outline"
-                    color="dark.3"
+                    color="gray"
                     leftSection={<IconCpu size={14} />}
                   >
                     Sprint 3
@@ -241,7 +241,7 @@ export default function ProjectDetailPage() {
                   <Badge
                     size="lg"
                     variant="outline"
-                    color="dark.3"
+                    color="gray"
                     leftSection={<IconMessageCircle size={14} />}
                   >
                     Sprint 5

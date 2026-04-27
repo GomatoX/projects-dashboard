@@ -114,7 +114,7 @@ export function PM2ResourceChart({ projectId, processName }: PM2ResourceChartPro
       <Box style={{ flex: 1, minHeight: 200 }}>
         {data.length < 2 ? (
           <Stack align="center" justify="center" h="100%" gap="xs">
-            <Badge size="sm" variant="outline" color="dark.3">
+            <Badge size="sm" variant="outline" color="gray">
               Collecting data...
             </Badge>
             <Text size="xs" c="dimmed">

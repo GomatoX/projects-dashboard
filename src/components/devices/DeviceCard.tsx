@@ -207,7 +207,7 @@ export function DeviceCard({
           </Badge>
 
           {lastSeen && (
-            <Badge size="sm" variant="outline" color="dark.3" leftSection={<IconClock size={10} />}>
+            <Badge size="sm" variant="outline" color="gray" leftSection={<IconClock size={10} />}>
               {formatLastSeen(lastSeen)}
             </Badge>
           )}
@@ -262,7 +262,7 @@ export function DeviceCard({
         {parsedCapabilities.length > 0 && (
           <Group gap={4}>
             {parsedCapabilities.map((cap) => (
-              <Badge key={cap} size="xs" variant="filled" color="dark.5">
+              <Badge key={cap} size="xs" variant="filled" color="gray">
                 {cap}
               </Badge>
             ))}

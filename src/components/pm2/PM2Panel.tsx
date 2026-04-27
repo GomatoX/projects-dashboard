@@ -354,7 +354,7 @@ function ProcessDetail({
               </Group>
               <Group justify="space-between">
                 <Text size="xs" c="dimmed">Mode</Text>
-                <Badge size="xs" variant="outline" color="dark.3">{proc.exec_mode}</Badge>
+                <Badge size="xs" variant="outline" color="gray">{proc.exec_mode}</Badge>
               </Group>
               {proc.node_version && (
                 <Group justify="space-between">

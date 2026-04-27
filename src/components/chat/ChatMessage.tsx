@@ -1,7 +1,12 @@
 'use client';
 
-import { Box, Group, Text, Avatar, Badge, ThemeIcon } from '@mantine/core';
-import { IconUser, IconSparkles } from '@tabler/icons-react';
+import { Box, Group, Text, Badge, ThemeIcon, Anchor } from '@mantine/core';
+import {
+  IconUser,
+  IconSparkles,
+  IconFile,
+  IconFileTypePdf,
+} from '@tabler/icons-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -18,13 +23,38 @@ export interface ChatMsg {
   timestamp: string;
 }
 
+// Mirror of the metadata POST /attachments returns and ChatPanel persists.
+// Stored as JSON-encoded text in chatMessages.attachments, so any field can
+// be missing on legacy rows — the renderer below tolerates partial data.
+interface StoredAttachment {
+  id?: string;
+  filename?: string;
+  name?: string;
+  type?: string;
+  size?: number;
+  url?: string;
+}
+
 interface ChatMessageProps {
   message: ChatMsg;
   isStreaming?: boolean;
 }
 
+// Parse the attachments column defensively — older rows have either '[]' or
+// nothing, and a bad JSON payload should never break message rendering.
+function parseAttachments(raw: string | null | undefined): StoredAttachment[] {
+  if (!raw) return [];
+  try {
+    const v = JSON.parse(raw);
+    return Array.isArray(v) ? (v as StoredAttachment[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
   const isUser = message.role === 'user';
+  const attachments = parseAttachments(message.attachments);
 
   return (
     <Box
@@ -54,7 +84,7 @@ export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
               {isUser ? 'You' : 'Claude'}
             </Text>
             {!isUser && message.tokensIn != null && (
-              <Badge size="xs" variant="outline" color="dark.4">
+              <Badge size="xs" variant="outline" color="gray">
                 {message.tokensIn}↓ {message.tokensOut}↑
               </Badge>
             )}
@@ -64,6 +94,14 @@ export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
               </Badge>
             )}
           </Group>
+
+          {attachments.length > 0 && (
+            <Group gap={6} mb={message.content ? 8 : 0} wrap="wrap">
+              {attachments.map((att, idx) => (
+                <AttachmentTile key={att.id ?? idx} attachment={att} />
+              ))}
+            </Group>
+          )}
 
           <Box
             className="chat-markdown"
@@ -111,7 +149,7 @@ export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
                         <Badge
                           size="xs"
                           variant="light"
-                          color="dark.3"
+                          color="gray"
                           mb="xs"
                           style={{ fontFamily: 'monospace', fontSize: 9 }}
                         >
@@ -223,5 +261,78 @@ export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
         </Box>
       </Group>
     </Box>
+  );
+}
+
+// One thumbnail / chip per stored attachment. Images render as a clickable
+// 80x80 preview that opens the full file in a new tab; everything else
+// (PDF, txt, …) falls back to a labeled chip with the filename + size, since
+// inlining 30 MB of PDF in chat history is rarely what the user wants.
+function AttachmentTile({ attachment }: { attachment: StoredAttachment }) {
+  const { url, type, name, size } = attachment;
+  if (!url) return null;
+  const isImage = (type ?? '').startsWith('image/');
+  const displayName = name ?? attachment.filename ?? 'file';
+
+  if (isImage) {
+    return (
+      <Anchor href={url} target="_blank" rel="noopener noreferrer" underline="never">
+        <Box
+          style={{
+            width: 80,
+            height: 80,
+            borderRadius: 'var(--mantine-radius-sm)',
+            border: '1px solid var(--mantine-color-dark-5)',
+            backgroundColor: 'var(--mantine-color-dark-7)',
+            overflow: 'hidden',
+          }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={url}
+            alt={displayName}
+            style={{
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+              display: 'block',
+            }}
+          />
+        </Box>
+      </Anchor>
+    );
+  }
+
+  const isPdf = type === 'application/pdf';
+  return (
+    <Anchor href={url} target="_blank" rel="noopener noreferrer" underline="never">
+      <Group
+        gap={8}
+        wrap="nowrap"
+        style={{
+          padding: '6px 10px',
+          borderRadius: 'var(--mantine-radius-sm)',
+          border: '1px solid var(--mantine-color-dark-5)',
+          backgroundColor: 'var(--mantine-color-dark-7)',
+          maxWidth: 220,
+        }}
+      >
+        {isPdf ? (
+          <IconFileTypePdf size={16} color="var(--mantine-color-red-5)" />
+        ) : (
+          <IconFile size={16} />
+        )}
+        <Box style={{ minWidth: 0 }}>
+          <Text size="xs" lineClamp={1} c="gray.2">
+            {displayName}
+          </Text>
+          {typeof size === 'number' && (
+            <Text size="xs" c="dimmed" style={{ fontSize: 10 }}>
+              {(size / 1024).toFixed(1)} KB
+            </Text>
+          )}
+        </Box>
+      </Group>
+    </Anchor>
   );
 }
