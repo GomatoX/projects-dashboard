@@ -14,12 +14,35 @@ import { chats, chatMessages, projects, projectMemory, devices } from '@/lib/db/
 import { eq, asc } from 'drizzle-orm';
 import { shouldAutoAllow, getToolMeta } from '@/lib/ai/tools';
 import { createPermissionRequest } from '@/lib/ai/permission-store';
-import { markStreamStart, markStreamEnd } from '@/lib/ai/active-streams';
+import { markStreamStart, markStreamEnd, isChatActive } from '@/lib/ai/active-streams';
+import { appendEvent } from '@/lib/ai/event-journal';
 import {
   DEFAULT_CLAUDE_PERMISSIONS,
   type AgentCommand,
   type ClaudePermissionConfig,
 } from '@/lib/socket/types';
+
+/**
+ * Tee an SSE event into both the HTTP response and the per-chat journal.
+ *
+ * `data` is the JSON payload (a JS object). The journal stores the raw
+ * stringified JSON (no `data: ` SSE prefix), so the subscribe endpoint
+ * can re-frame it consistently. The HTTP response side gets the full SSE
+ * line including the prefix and `\n\n` terminator.
+ *
+ * Awaits the journal write so DB inserts stay ordered; callers that are
+ * already in async generator/for-await loops pay sub-ms latency per call.
+ */
+async function writeEvent(
+  controllerEnqueue: (chunk: Uint8Array) => void,
+  encoder: TextEncoder,
+  chatId: string,
+  data: Record<string, unknown>,
+): Promise<void> {
+  const json = JSON.stringify(data);
+  await appendEvent(chatId, json);
+  controllerEnqueue(encoder.encode(`data: ${json}\n\n`));
+}
 
 type AgentManagerModule = typeof import('@/lib/socket/agent-manager');
 
@@ -46,6 +69,21 @@ export async function POST(
   { params }: { params: Promise<{ id: string; chatId: string }> },
 ) {
   const { id: projectId, chatId } = await params;
+
+  // Reject if a stream is already in flight for this chat. Late joiners
+  // should hit GET …/stream/subscribe, not start a duplicate turn. The
+  // authoritative guard is `markStreamStart` returning false (which the
+  // start callback also checks), but rejecting here is cheaper.
+  if (isChatActive(chatId)) {
+    return new Response(
+      JSON.stringify({ error: 'stream_already_active', chatId }),
+      {
+        status: 409,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
+  }
+
   const body = await request.json();
   const userMessage: string = body.message ?? '';
   const executionMode: 'local' | 'remote' | undefined = body.executionMode;
@@ -250,7 +288,16 @@ function handleLocalStream(args: StreamArgs) {
       // after a page refresh (the original SSE connection dies with the page,
       // but the agent turn keeps running here). Always paired with
       // markStreamEnd in the finally block below.
-      markStreamStart(projectId, chatId);
+      const ok = await markStreamStart(projectId, chatId);
+      if (!ok) {
+        const json = JSON.stringify({
+          type: 'error',
+          message: 'stream_already_active',
+        });
+        controller.enqueue(encoder.encode(`data: ${json}\n\n`));
+        controller.close();
+        return;
+      }
 
       const safeEnqueue = (data: Uint8Array) => {
         if (!closed) {
@@ -306,37 +353,29 @@ function handleLocalStream(args: StreamArgs) {
 
               if (shouldAutoAllow(toolName)) {
                 // Auto-allowed tool — show brief activity badge
-                safeEnqueue(
-                  encoder.encode(
-                    `data: ${JSON.stringify({
-                      type: 'tool_use',
-                      tool: {
-                        id: opts.toolUseID,
-                        toolName,
-                        displayName: meta.displayName,
-                        status: 'auto',
-                        input,
-                      },
-                    })}\n\n`,
-                  ),
-                );
+                await writeEvent(safeEnqueue, encoder, chatId, {
+                  type: 'tool_use',
+                  tool: {
+                    id: opts.toolUseID,
+                    toolName,
+                    displayName: meta.displayName,
+                    status: 'auto',
+                    input,
+                  },
+                });
               } else {
                 // 'ask' tools (Bash, Task) — still show activity but auto-allow
                 // since bypassPermissions handles the SDK side
-                safeEnqueue(
-                  encoder.encode(
-                    `data: ${JSON.stringify({
-                      type: 'tool_use',
-                      tool: {
-                        id: opts.toolUseID,
-                        toolName,
-                        displayName: meta.displayName,
-                        status: 'auto',
-                        input,
-                      },
-                    })}\n\n`,
-                  ),
-                );
+                await writeEvent(safeEnqueue, encoder, chatId, {
+                  type: 'tool_use',
+                  tool: {
+                    id: opts.toolUseID,
+                    toolName,
+                    displayName: meta.displayName,
+                    status: 'auto',
+                    input,
+                  },
+                });
               }
 
               return {
@@ -408,11 +447,7 @@ function handleLocalStream(args: StreamArgs) {
                 const delta = event.delta;
                 if (delta.type === 'text_delta' && delta.text) {
                   fullContent += delta.text;
-                  safeEnqueue(
-                    encoder.encode(
-                      `data: ${JSON.stringify({ type: 'text', text: delta.text })}\n\n`,
-                    ),
-                  );
+                  await writeEvent(safeEnqueue, encoder, chatId, { type: 'text', text: delta.text });
                 }
               }
               break;
@@ -425,26 +460,18 @@ function handleLocalStream(args: StreamArgs) {
         }
 
         // Send done event
-        safeEnqueue(
-          encoder.encode(
-            `data: ${JSON.stringify({
-              type: 'done',
-              messageId: assistantMsgId,
-              tokensIn: inputTokens,
-              tokensOut: outputTokens,
-              cost: totalCost,
-            })}\n\n`,
-          ),
-        );
+        await writeEvent(safeEnqueue, encoder, chatId, {
+          type: 'done',
+          messageId: assistantMsgId,
+          tokensIn: inputTokens,
+          tokensOut: outputTokens,
+          cost: totalCost,
+        });
       } catch (error) {
         console.error('[Chat] Stream error:', error);
         const errorMsg =
           error instanceof Error ? error.message : 'AI request failed';
-        safeEnqueue(
-          encoder.encode(
-            `data: ${JSON.stringify({ type: 'error', message: errorMsg })}\n\n`,
-          ),
-        );
+        await writeEvent(safeEnqueue, encoder, chatId, { type: 'error', message: errorMsg });
       } finally {
         // Always save assistant message to DB (even if stream errored)
         if (fullContent) {
@@ -486,7 +513,7 @@ function handleLocalStream(args: StreamArgs) {
           }
         }
 
-        markStreamEnd(projectId, chatId);
+        await markStreamEnd(projectId, chatId);
         safeClose();
       }
     },
@@ -515,7 +542,16 @@ function handleRemoteStream(args: StreamArgs) {
     async start(controller) {
       let closed = false;
 
-      markStreamStart(projectId, chatId);
+      const ok = await markStreamStart(projectId, chatId);
+      if (!ok) {
+        const json = JSON.stringify({
+          type: 'error',
+          message: 'stream_already_active',
+        });
+        controller.enqueue(encoder.encode(`data: ${json}\n\n`));
+        controller.close();
+        return;
+      }
 
       const safeEnqueue = (data: Uint8Array) => {
         if (!closed) {
@@ -540,48 +576,36 @@ function handleRemoteStream(args: StreamArgs) {
 
       // ─── Validate device connectivity ───────────────────
       if (!project.deviceId) {
-        safeEnqueue(
-          encoder.encode(
-            `data: ${JSON.stringify({
-              type: 'error',
-              message: 'Project has no device assigned',
-              code: 'DEVICE_OFFLINE',
-            })}\n\n`,
-          ),
-        );
-        markStreamEnd(projectId, chatId);
+        await writeEvent(safeEnqueue, encoder, chatId, {
+          type: 'error',
+          message: 'Project has no device assigned',
+          code: 'DEVICE_OFFLINE',
+        });
+        await markStreamEnd(projectId, chatId);
         safeClose();
         return;
       }
 
       const agentManager = getAgentManager();
       if (!agentManager || !agentManager.isDeviceConnected(project.deviceId)) {
-        safeEnqueue(
-          encoder.encode(
-            `data: ${JSON.stringify({
-              type: 'error',
-              message: 'Device is not connected',
-              code: 'DEVICE_OFFLINE',
-            })}\n\n`,
-          ),
-        );
-        markStreamEnd(projectId, chatId);
+        await writeEvent(safeEnqueue, encoder, chatId, {
+          type: 'error',
+          message: 'Device is not connected',
+          code: 'DEVICE_OFFLINE',
+        });
+        await markStreamEnd(projectId, chatId);
         safeClose();
         return;
       }
 
       const socket = agentManager.getAgentSocket(project.deviceId);
       if (!socket) {
-        safeEnqueue(
-          encoder.encode(
-            `data: ${JSON.stringify({
-              type: 'error',
-              message: 'Agent socket not available',
-              code: 'DEVICE_OFFLINE',
-            })}\n\n`,
-          ),
-        );
-        markStreamEnd(projectId, chatId);
+        await writeEvent(safeEnqueue, encoder, chatId, {
+          type: 'error',
+          message: 'Agent socket not available',
+          code: 'DEVICE_OFFLINE',
+        });
+        await markStreamEnd(projectId, chatId);
         safeClose();
         return;
       }
@@ -614,17 +638,13 @@ function handleRemoteStream(args: StreamArgs) {
 
       // Emit session_started so the client knows the sessionId for
       // cancel/permission round-trips.
-      safeEnqueue(
-        encoder.encode(
-          `data: ${JSON.stringify({
-            type: 'session_started',
-            sessionId,
-          })}\n\n`,
-        ),
-      );
+      await writeEvent(safeEnqueue, encoder, chatId, {
+        type: 'session_started',
+        sessionId,
+      });
 
       // ─── Listen for agent events filtered by sessionId ──
-      const onEvent = (event: Record<string, unknown>) => {
+      const onEvent = async (event: Record<string, unknown>) => {
         if (event.sessionId !== sessionId) return;
 
         const type = event.type as string;
@@ -633,11 +653,7 @@ function handleRemoteStream(args: StreamArgs) {
           case 'CLAUDE_TEXT': {
             const text = event.text as string;
             fullContent += text;
-            safeEnqueue(
-              encoder.encode(
-                `data: ${JSON.stringify({ type: 'text', text })}\n\n`,
-              ),
-            );
+            await writeEvent(safeEnqueue, encoder, chatId, { type: 'text', text });
             break;
           }
 
@@ -656,36 +672,28 @@ function handleRemoteStream(args: StreamArgs) {
             }
 
             // Translate to the SSE shape ChatPanel already understands
-            safeEnqueue(
-              encoder.encode(
-                `data: ${JSON.stringify({
-                  type: 'tool_use',
-                  tool: {
-                    id: toolUseId,
-                    toolName,
-                    displayName: toolName,
-                    status: toolStatus,
-                    input,
-                  },
-                })}\n\n`,
-              ),
-            );
+            await writeEvent(safeEnqueue, encoder, chatId, {
+              type: 'tool_use',
+              tool: {
+                id: toolUseId,
+                toolName,
+                displayName: toolName,
+                status: toolStatus,
+                input,
+              },
+            });
             break;
           }
 
           case 'CLAUDE_PERMISSION_REQUEST': {
-            safeEnqueue(
-              encoder.encode(
-                `data: ${JSON.stringify({
-                  type: 'permission_request',
-                  sessionId,
-                  requestId: event.requestId as string,
-                  toolName: event.toolName as string,
-                  input: event.input as Record<string, unknown>,
-                  reason: event.reason as string,
-                })}\n\n`,
-              ),
-            );
+            await writeEvent(safeEnqueue, encoder, chatId, {
+              type: 'permission_request',
+              sessionId,
+              requestId: event.requestId as string,
+              toolName: event.toolName as string,
+              input: event.input as Record<string, unknown>,
+              reason: event.reason as string,
+            });
             break;
           }
 
@@ -694,106 +702,93 @@ function handleRemoteStream(args: StreamArgs) {
             tokensOut = (event.tokensOut as number) ?? 0;
             costUsd = (event.costUsd as number) ?? 0;
 
-            safeEnqueue(
-              encoder.encode(
-                `data: ${JSON.stringify({
-                  type: 'done',
-                  messageId: assistantMsgId,
-                  tokensIn,
-                  tokensOut,
-                  cost: costUsd,
-                  sessionId,
-                })}\n\n`,
-              ),
-            );
-
-            // Persist and close — done inside an async IIFE because the
-            // event handler is sync.
-            (async () => {
-              try {
-                if (fullContent) {
-                  await db.insert(chatMessages).values({
-                    id: assistantMsgId,
-                    chatId,
-                    role: 'assistant',
-                    content: fullContent,
-                    toolUses: JSON.stringify(toolUses),
-                    proposedChanges: '[]',
-                    attachments: '[]',
-                    executionMode: 'remote',
-                    tokensIn,
-                    tokensOut,
-                    timestamp: new Date(),
-                  });
-                }
-
-                await db
-                  .update(chats)
-                  .set({
-                    totalTokensIn: chat.totalTokensIn + tokensIn,
-                    totalTokensOut: chat.totalTokensOut + tokensOut,
-                    estimatedCost: chat.estimatedCost + costUsd,
-                    updatedAt: new Date(),
-                  })
-                  .where(eq(chats.id, chatId));
-
-                if (history.length <= 1) {
-                  const title =
-                    userMessage.length > 50
-                      ? userMessage.slice(0, 50) + '...'
-                      : userMessage;
-                  await db.update(chats).set({ title }).where(eq(chats.id, chatId));
-                }
-              } catch (err) {
-                console.error('[Chat/Remote] Failed to save message:', err);
-              } finally {
-                markStreamEnd(projectId, chatId);
-                safeClose();
-              }
-            })();
+            await writeEvent(safeEnqueue, encoder, chatId, {
+              type: 'done',
+              messageId: assistantMsgId,
+              tokensIn,
+              tokensOut,
+              cost: costUsd,
+              sessionId,
+            });
 
             socket.off('event', onEvent);
+
+            // Persist and close
+            try {
+              if (fullContent) {
+                await db.insert(chatMessages).values({
+                  id: assistantMsgId,
+                  chatId,
+                  role: 'assistant',
+                  content: fullContent,
+                  toolUses: JSON.stringify(toolUses),
+                  proposedChanges: '[]',
+                  attachments: '[]',
+                  executionMode: 'remote',
+                  tokensIn,
+                  tokensOut,
+                  timestamp: new Date(),
+                });
+              }
+
+              await db
+                .update(chats)
+                .set({
+                  totalTokensIn: chat.totalTokensIn + tokensIn,
+                  totalTokensOut: chat.totalTokensOut + tokensOut,
+                  estimatedCost: chat.estimatedCost + costUsd,
+                  updatedAt: new Date(),
+                })
+                .where(eq(chats.id, chatId));
+
+              if (history.length <= 1) {
+                const title =
+                  userMessage.length > 50
+                    ? userMessage.slice(0, 50) + '...'
+                    : userMessage;
+                await db.update(chats).set({ title }).where(eq(chats.id, chatId));
+              }
+            } catch (err) {
+              console.error('[Chat/Remote] Failed to save message:', err);
+            } finally {
+              await markStreamEnd(projectId, chatId);
+              safeClose();
+            }
             break;
           }
 
           case 'CLAUDE_ERROR': {
             const errorMessage = event.message as string;
-            safeEnqueue(
-              encoder.encode(
-                `data: ${JSON.stringify({
-                  type: 'error',
-                  message: errorMessage,
-                })}\n\n`,
-              ),
-            );
-
-            // Persist partial content if any
-            (async () => {
-              try {
-                if (fullContent) {
-                  await db.insert(chatMessages).values({
-                    id: assistantMsgId,
-                    chatId,
-                    role: 'assistant',
-                    content: fullContent,
-                    toolUses: JSON.stringify(toolUses),
-                    proposedChanges: '[]',
-                    attachments: '[]',
-                    executionMode: 'remote',
-                    tokensIn,
-                    tokensOut,
-                    timestamp: new Date(),
-                  });
-                }
-              } catch (err) {
-                console.error('[Chat/Remote] Failed to save partial message:', err);
-              } finally {
-                markStreamEnd(projectId, chatId);
-                safeClose();
-              }
-            })();
+            await writeEvent(safeEnqueue, encoder, chatId, {
+              type: 'error',
+              message: errorMessage,
+            });
 
             socket.off('event', onEvent);
+
+            // Persist partial content if any
+            try {
+              if (fullContent) {
+                await db.insert(chatMessages).values({
+                  id: assistantMsgId,
+                  chatId,
+                  role: 'assistant',
+                  content: fullContent,
+                  toolUses: JSON.stringify(toolUses),
+                  proposedChanges: '[]',
+                  attachments: '[]',
+                  executionMode: 'remote',
+                  tokensIn,
+                  tokensOut,
+                  timestamp: new Date(),
+                });
+              }
+            } catch (err) {
+              console.error('[Chat/Remote] Failed to save partial message:', err);
+            } finally {
+              await markStreamEnd(projectId, chatId);
+              safeClose();
+            }
             break;
           }
 
@@ -819,15 +814,18 @@ function handleRemoteStream(args: StreamArgs) {
       };
       socket.emit('command', command);
 
-      // ─── Client disconnect → cancel on device ──────────
+      // ─── Client disconnect → keep agent running, stop forwarding ──
+      // The agent must continue independently of this HTTP request — the
+      // user may have switched tabs/projects or reloaded the page. Late
+      // subscribers can pick up the in-flight turn via the subscribe
+      // endpoint, which reads from the journal. We do NOT detach the
+      // socket listener here either: it must keep appending events to
+      // the journal, and it self-detaches inside `onEvent` when CLAUDE_DONE
+      // or CLAUDE_ERROR fires.
       request.signal.addEventListener('abort', () => {
-        socket.off('event', onEvent);
-        socket.emit('command', {
-          type: 'CLAUDE_CANCEL',
-          id: nanoid(),
-          sessionId,
-        } satisfies AgentCommand);
-        markStreamEnd(projectId, chatId);
+        // Mark the response closed so safeEnqueue stops trying to write.
+        // Do NOT call markStreamEnd, do NOT cancel the agent, do NOT
+        // detach onEvent.
         safeClose();
       });
     },
