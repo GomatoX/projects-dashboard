@@ -102,6 +102,12 @@ export async function startJournal(chatId: string): Promise<boolean> {
  * Live listeners ARE notified even if the DB insert throws — losing the
  * persisted copy of one event is preferable to dropping a frame from
  * the live UI. The error is logged so it shows up in the dev console.
+ *
+ * Note: a failed insert leaves a gap in the persisted seq sequence
+ * (e.g. 1, 2, 4 if seq=3 fails). Subscribe replay (`getSnapshot`) will
+ * not see the failed event; live listeners did. The subscribe endpoint
+ * tolerates non-contiguous seq because its dedupe is `seq <= lastSentSeq`,
+ * which works correctly across gaps.
  */
 export async function appendEvent(
   chatId: string,
@@ -167,6 +173,10 @@ export async function endJournal(chatId: string): Promise<void> {
   meta.listeners.clear();
 
   meta.cleanupTimer = setTimeout(() => {
+    // Guard: a fresh journal may have claimed this chatId during the
+    // retention window. If so, leave its rows alone — the new journal
+    // owns them now and will run its own cleanup when it ends.
+    if (active.has(chatId)) return;
     void deleteJournal(chatId).catch(() => {});
   }, POST_END_RETENTION_MS);
 }
@@ -246,14 +256,22 @@ export async function getSnapshot(
  *
  * Returns an unsubscribe function. If the journal is not active (either
  * already ended or never started in this process), the listener is
- * called immediately with the end sentinel.
+ * called immediately with the end sentinel via `queueMicrotask` so
+ * callers can finish setup before the sentinel fires.
  *
- * Caller is responsible for combining `getSnapshot` + `subscribe` so
- * that:
- *   1. subscribe BEFORE getSnapshot (so a concurrent appendEvent that
- *      lands between the two calls is not lost),
- *   2. dedupe by seq (the snapshot may overlap with the first listener
- *      events).
+ * Recommended pairing with `getSnapshot`:
+ *   1. `const snapshot = await getSnapshot(chatId, since)`
+ *   2. `const off = subscribe(chatId, listener)`
+ *   3. flush snapshot.events through `listener` (dedupe by seq inside
+ *      the listener — `event.seq <= lastSentSeq` skips)
+ *   4. let live appendEvents flow through `listener` naturally
+ *
+ * The narrow window between (1)'s SELECT and (2)'s register can miss
+ * events that landed in the DB after the SELECT but before subscribe.
+ * For chat streams this is acceptable: the next `getSnapshot` (e.g.
+ * if the SSE client reconnects with `?since=lastSeq`) will pick them
+ * up. If you need stronger guarantees, buffer events locally between
+ * (2) and (3) and dedupe across the seam.
  */
 export function subscribe(
   chatId: string,
