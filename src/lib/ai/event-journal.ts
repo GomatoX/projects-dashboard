@@ -40,11 +40,26 @@ interface ActiveMeta {
   /** Authoritative sequence counter while the journal is active. */
   nextSeq: number;
   listeners: Set<JournalListener>;
-  /** Cleanup timer set by endJournal — stored so re-start can clear it. */
-  cleanupTimer: ReturnType<typeof setTimeout> | null;
 }
 
 const active = new Map<string, ActiveMeta>();
+
+/**
+ * Cleanup timers from `endJournal` keyed by chatId at module scope (not on
+ * the dropped `ActiveMeta` instance). Storing them here is what lets a
+ * subsequent `startJournal` clear the prior timer — otherwise the old
+ * timer would fire mid-retention of a successor journal and delete its
+ * rows ~15s into the new 30s window.
+ */
+const pendingCleanup = new Map<string, ReturnType<typeof setTimeout>>();
+
+function clearPendingCleanup(chatId: string): void {
+  const t = pendingCleanup.get(chatId);
+  if (t) {
+    clearTimeout(t);
+    pendingCleanup.delete(chatId);
+  }
+}
 
 /** How long after a stream ends we keep the journal rows for late readers. */
 const POST_END_RETENTION_MS = 30_000;
@@ -62,35 +77,50 @@ const POST_END_RETENTION_MS = 30_000;
 export async function startJournal(chatId: string): Promise<boolean> {
   if (active.has(chatId)) return false;
 
-  await db.transaction(async (tx) => {
-    await tx.delete(chatStreamEvents).where(eq(chatStreamEvents.chatId, chatId));
-    // Upsert journal row to a fresh active state.
-    await tx
-      .insert(chatStreamJournals)
-      .values({
-        chatId,
-        status: 'active',
-        startedAt: new Date(),
-        endedAt: null,
-        nextSeq: 1,
-      })
-      .onConflictDoUpdate({
-        target: chatStreamJournals.chatId,
-        set: {
-          status: 'active',
-          startedAt: new Date(),
-          endedAt: null,
-          nextSeq: 1,
-        },
-      });
-  });
-
+  // Claim the in-memory slot SYNCHRONOUSLY so a concurrent startJournal
+  // for the same chatId sees `active.has(chatId)` and returns false BEFORE
+  // its DB transaction begins. Without this, two POSTs that both pass
+  // `isChatActive` could both enter the tx, both succeed, and both believe
+  // they own the journal — corrupting the event log via interleaved seqs.
   active.set(chatId, {
     chatId,
     nextSeq: 1,
     listeners: new Set(),
-    cleanupTimer: null,
   });
+
+  // A successor journal claiming this chatId cancels any pending cleanup
+  // from the previous turn — those rows are now ours to manage.
+  clearPendingCleanup(chatId);
+
+  try {
+    await db.transaction(async (tx) => {
+      await tx.delete(chatStreamEvents).where(eq(chatStreamEvents.chatId, chatId));
+      // Upsert journal row to a fresh active state.
+      await tx
+        .insert(chatStreamJournals)
+        .values({
+          chatId,
+          status: 'active',
+          startedAt: new Date(),
+          endedAt: null,
+          nextSeq: 1,
+        })
+        .onConflictDoUpdate({
+          target: chatStreamJournals.chatId,
+          set: {
+            status: 'active',
+            startedAt: new Date(),
+            endedAt: null,
+            nextSeq: 1,
+          },
+        });
+    });
+  } catch (err) {
+    // Release the slot so the caller can retry rather than be 409'd forever.
+    active.delete(chatId);
+    throw err;
+  }
+
   return true;
 }
 
@@ -179,13 +209,20 @@ export async function endJournal(chatId: string): Promise<void> {
   }
   meta.listeners.clear();
 
-  meta.cleanupTimer = setTimeout(() => {
+  // Replace any stale cleanup timer for this chatId — only the most
+  // recent endJournal's retention window applies. Without this, an old
+  // timer from a previous turn could fire ~15s into a successor journal's
+  // retention and delete its rows.
+  clearPendingCleanup(chatId);
+  const timer = setTimeout(() => {
+    pendingCleanup.delete(chatId);
     // Guard: a fresh journal may have claimed this chatId during the
-    // retention window. If so, leave its rows alone — the new journal
-    // owns them now and will run its own cleanup when it ends.
+    // retention window. If so, leave its rows alone — startJournal
+    // already cleared this timer, but check defensively.
     if (active.has(chatId)) return;
     void deleteJournal(chatId).catch(() => {});
   }, POST_END_RETENTION_MS);
+  pendingCleanup.set(chatId, timer);
 }
 
 async function deleteJournal(chatId: string): Promise<void> {
@@ -377,9 +414,8 @@ export async function crashRecovery(): Promise<void> {
 
 /** Test/diagnostic only — do not use from request handlers. */
 export async function __resetJournalsForTest(): Promise<void> {
-  for (const meta of active.values()) {
-    if (meta.cleanupTimer) clearTimeout(meta.cleanupTimer);
-  }
+  for (const t of pendingCleanup.values()) clearTimeout(t);
+  pendingCleanup.clear();
   active.clear();
   await db.delete(chatStreamEvents);
   await db.delete(chatStreamJournals);
