@@ -23,6 +23,7 @@ import {
 import {
   DEFAULT_CLAUDE_PERMISSIONS,
   type AgentCommand,
+  type ClaudeAttachment,
   type ClaudePermissionConfig,
 } from '@/lib/socket/types';
 
@@ -199,37 +200,41 @@ export async function POST(
     .join('\n\n');
 
   // If the user attached files, surface them to the agent as absolute paths
-  // on disk. The agent runs through the Claude Code CLI, whose built-in Read
-  // tool is multimodal — pointing it at an image/PDF path is enough for the
-  // model to "see" the contents. We deliberately do NOT inline the bytes
-  // (no base64 in the prompt) because that would balloon token usage and
+  // on disk. The agent (local or remote) uses the Claude Code multimodal
+  // Read tool — pointing it at an image/PDF path is enough for the model
+  // to "see" the contents. We deliberately do NOT inline the bytes (no
+  // base64 in the prompt) because that would balloon token usage and
   // duplicate work the Read tool already does optimally.
   //
-  // Paths are resolved against the Next server's cwd (where data/uploads
-  // lives), not the project's cwd that the agent is launched in — the
-  // absolute path makes the difference irrelevant to the agent.
+  // The prompt is built once with `__ATTACHMENT_<index>__` placeholders.
+  //   • LOCAL mode resolves them to dashboard-side absolute paths right
+  //     here, since the SDK runs in this same Next.js process.
+  //   • REMOTE mode leaves the placeholders in the prompt and ships the
+  //     attachment metadata over the socket; the device-side agent
+  //     downloads each file via HTTP and rewrites the placeholders to
+  //     device-local absolute paths just before invoking the SDK.
+  // Either way the model sees clean absolute paths — never a placeholder.
+  const attachmentTokens: ClaudeAttachment[] = attachments.map((a, i) => ({
+    filename: a.filename,
+    name: a.name,
+    type: a.type,
+    placeholder: `__ATTACHMENT_${i}__`,
+  }));
+
   let attachmentNote = '';
-  if (attachments.length > 0) {
-    const lines = attachments.map((a) => {
-      const abs = path.join(
-        process.cwd(),
-        'data',
-        'uploads',
-        'chats',
-        chatId,
-        a.filename,
-      );
-      return `- ${a.name} (${a.type}) → ${abs}`;
-    });
+  if (attachmentTokens.length > 0) {
+    const lines = attachmentTokens.map(
+      (t) => `- ${t.name} (${t.type}) → ${t.placeholder}`,
+    );
     attachmentNote =
-      `\n\n[The user attached ${attachments.length} file(s). ` +
+      `\n\n[The user attached ${attachmentTokens.length} file(s). ` +
       `Use the Read tool on the absolute paths below to inspect them — ` +
       `images and PDFs are rendered visually.]\n` +
       lines.join('\n');
   }
 
   const userTurn = `${userMessage}${attachmentNote}`;
-  const fullPrompt = historyContext
+  const promptWithPlaceholders = historyContext
     ? `Previous conversation:\n${historyContext}\n\nHuman: ${userTurn}`
     : userTurn;
 
@@ -241,11 +246,28 @@ export async function POST(
       chatId,
       chat,
       project,
-      fullPrompt,
+      fullPrompt: promptWithPlaceholders,
       systemPrompt,
       userMessage,
       history,
+      attachments: attachmentTokens,
     });
+  }
+
+  // LOCAL: substitute placeholders with dashboard-side absolute paths.
+  // `process.cwd()` is the Next.js server cwd, which is where
+  // `data/uploads/chats/<chatId>/...` lives.
+  let fullPrompt = promptWithPlaceholders;
+  for (const t of attachmentTokens) {
+    const abs = path.join(
+      process.cwd(),
+      'data',
+      'uploads',
+      'chats',
+      chatId,
+      t.filename,
+    );
+    fullPrompt = fullPrompt.split(t.placeholder).join(abs);
   }
 
   return handleLocalStream({
@@ -273,6 +295,12 @@ interface StreamArgs {
   systemPrompt: string;
   userMessage: string;
   history: (typeof chatMessages.$inferSelect)[];
+}
+
+// Remote-only — local mode pre-substitutes placeholders inline so it
+// doesn't need this metadata.
+interface RemoteStreamArgs extends StreamArgs {
+  attachments: ClaudeAttachment[];
 }
 
 function handleLocalStream(args: StreamArgs) {
@@ -663,9 +691,19 @@ function handleLocalStream(args: StreamArgs) {
 
 // ─── REMOTE execution (device-side agent via Socket.io) ─────
 
-function handleRemoteStream(args: StreamArgs) {
-  const { request, projectId, chatId, chat, project, fullPrompt, systemPrompt, userMessage, history } =
-    args;
+function handleRemoteStream(args: RemoteStreamArgs) {
+  const {
+    request,
+    projectId,
+    chatId,
+    chat,
+    project,
+    fullPrompt,
+    systemPrompt,
+    userMessage,
+    history,
+    attachments: queryAttachments,
+  } = args;
 
   const encoder = new TextEncoder();
   const assistantMsgId = nanoid();
@@ -972,6 +1010,16 @@ function handleRemoteStream(args: StreamArgs) {
         ...(systemPrompt ? { systemPrompt } : {}),
         ...(chat.model ? { model: chat.model } : {}),
         permissions,
+        // Only attach the metadata block when there's actually something to
+        // download — a 0-length array would make the agent log "fetching 0
+        // attachments" which is just noise.
+        ...(queryAttachments.length > 0
+          ? {
+              attachments: queryAttachments,
+              chatId,
+              projectId,
+            }
+          : {}),
       };
       socket.emit('command', command);
 

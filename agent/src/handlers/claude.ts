@@ -16,8 +16,13 @@ import type {
 } from '@anthropic-ai/claude-agent-sdk';
 import type {
   AgentEvent,
+  ClaudeAttachment,
   ClaudePermissionConfig,
 } from '../../../src/lib/socket/types.js';
+import {
+  fetchAttachments,
+  rewritePromptPlaceholders,
+} from '../attachments.js';
 
 // ─── In-flight Claude sessions ────────────────────────────
 //
@@ -108,6 +113,14 @@ interface RunClaudeArgs {
   maxTurns?: number;
   claudePath?: string;
   permissions: ClaudePermissionConfig;
+  // ─── Attachments (optional) ────────────────────────────
+  // Present iff the user attached files to this turn. The dashboard
+  // hosts the bytes; we download them via HTTP before invoking the SDK.
+  attachments?: ClaudeAttachment[];
+  chatId?: string;
+  projectId?: string;
+  dashboardUrl?: string;
+  agentToken?: string;
 }
 
 /**
@@ -127,6 +140,11 @@ export async function runClaudeQuery(args: RunClaudeArgs): Promise<void> {
     maxTurns,
     claudePath,
     permissions,
+    attachments,
+    chatId,
+    projectId,
+    dashboardUrl,
+    agentToken,
   } = args;
 
   const emit = (event: AgentEvent) => socket.emit('event', event);
@@ -161,13 +179,49 @@ export async function runClaudeQuery(args: RunClaudeArgs): Promise<void> {
   let costUsd = 0;
 
   try {
+    // ─── Resolve attachments (if any) ─────────────────────
+    // The dashboard sent us metadata + placeholder tokens in the prompt.
+    // Download the bytes to a local temp dir and rewrite the placeholders
+    // before handing the prompt to the SDK — the multimodal Read tool
+    // needs a real device-local path. Any download failure is fatal:
+    // letting the SDK loose with `__ATTACHMENT_0__` literals in the
+    // prompt would produce a confused, unhelpful reply.
+    let resolvedPrompt = prompt;
+    if (attachments && attachments.length > 0) {
+      console.log(
+        `[claude] CLAUDE_QUERY has ${attachments.length} attachment(s): ` +
+          attachments.map((a) => a.name).join(', '),
+      );
+      if (!chatId || !projectId || !dashboardUrl || !agentToken) {
+        throw new Error(
+          'CLAUDE_QUERY has attachments but is missing chatId/projectId/dashboardUrl/agentToken',
+        );
+      }
+      const fetched = await fetchAttachments({
+        dashboardUrl,
+        agentToken,
+        projectId,
+        chatId,
+        attachments,
+      });
+      const pairs = Object.entries(fetched.pathByPlaceholder);
+      console.log(
+        `[claude] downloaded ${pairs.length} attachment(s) → ` +
+          pairs.map(([k, v]) => `${k}=${v}`).join(', '),
+      );
+      resolvedPrompt = rewritePromptPlaceholders(prompt, fetched.pathByPlaceholder);
+    } else if (attachments) {
+      // Empty array — informational, not an error
+      console.log('[claude] CLAUDE_QUERY: attachments array empty');
+    }
+
     const resolvedClaudePath =
       claudePath ||
       process.env.CLAUDE_PATH ||
       `${process.env.HOME}/.local/bin/claude`;
     const resolvedCwd = expandHome(projectPath);
     const agentQuery = query({
-      prompt,
+      prompt: resolvedPrompt,
       options: {
         pathToClaudeCodeExecutable: resolvedClaudePath,
         cwd: resolvedCwd,

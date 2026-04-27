@@ -4,6 +4,21 @@ set -e
 INSTALL_DIR="$HOME/.dev-dashboard-agent"
 DASHBOARD_URL="${1}"
 AGENT_TOKEN="${2}"
+PLIST="$HOME/Library/LaunchAgents/com.devdashboard.agent.plist"
+
+# If args missing but an existing .env is present, reuse its values.
+# This makes the same install URL work as both installer and updater:
+#
+#   First install: curl ... | bash -s -- <url> <token>
+#   Update:        curl ... | bash         (reuses ~/.dev-dashboard-agent/.env)
+#
+if [ -z "$DASHBOARD_URL" ] || [ -z "$AGENT_TOKEN" ]; then
+  if [ -f "$INSTALL_DIR/.env" ]; then
+    [ -z "$DASHBOARD_URL" ] && DASHBOARD_URL=$(grep -E '^DASHBOARD_URL=' "$INSTALL_DIR/.env" | head -n1 | cut -d= -f2-)
+    [ -z "$AGENT_TOKEN" ]   && AGENT_TOKEN=$(grep -E '^AGENT_TOKEN=' "$INSTALL_DIR/.env" | head -n1 | cut -d= -f2-)
+    echo "ℹ Reusing DASHBOARD_URL / AGENT_TOKEN from $INSTALL_DIR/.env"
+  fi
+fi
 
 if [ -z "$AGENT_TOKEN" ] || [ -z "$DASHBOARD_URL" ]; then
   echo "Usage: curl -fsSL <dashboard>/install/mac | bash -s -- <dashboard_url> <agent_token>"
@@ -12,8 +27,19 @@ if [ -z "$AGENT_TOKEN" ] || [ -z "$DASHBOARD_URL" ]; then
   exit 1
 fi
 
+# Detect install vs update so we can show useful progress
+PREV_VERSION=""
+if [ -f "$INSTALL_DIR/package.json" ]; then
+  PREV_VERSION=$(grep -E '"version"' "$INSTALL_DIR/package.json" | head -n1 | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+fi
+
 echo "🔧 Dev Dashboard Agent Installer (macOS)"
 echo "──────────────────────────────────────────"
+if [ -n "$PREV_VERSION" ]; then
+  echo "Mode:      UPDATE (current v$PREV_VERSION)"
+else
+  echo "Mode:      FRESH INSTALL"
+fi
 echo "Dashboard: $DASHBOARD_URL"
 echo "Install:   $INSTALL_DIR"
 echo ""
@@ -32,34 +58,49 @@ command -v pnpm >/dev/null 2>&1 || {
   npm install -g pnpm
 }
 
-# Clone / update agent
-if [ -d "$INSTALL_DIR" ]; then
-  echo "📂 Updating existing agent..."
-  cd "$INSTALL_DIR"
-  git pull --rebase 2>/dev/null || true
-else
-  echo "📥 Downloading agent..."
-  if [ -d "/opt/dev-dashboard-agent" ]; then
-    cp -r /opt/dev-dashboard-agent "$INSTALL_DIR"
-  else
-    mkdir -p "$INSTALL_DIR"
-    curl -fsSL "$DASHBOARD_URL/api/agent/download" -o /tmp/agent.tar.gz 2>/dev/null && \
-      tar -xzf /tmp/agent.tar.gz -C "$INSTALL_DIR" && \
-      rm /tmp/agent.tar.gz || {
-        echo "⚠ Could not download agent package."
-        echo "Copy the agent/ directory manually to $INSTALL_DIR"
-        exit 1
-      }
-  fi
+# Stop running agent before swapping files (safe even if not loaded yet)
+if [ -f "$PLIST" ]; then
+  echo "🛑 Stopping running agent (if any)..."
+  launchctl unload "$PLIST" 2>/dev/null || true
 fi
+
+# ALWAYS download a fresh tarball. The previous version tried `git pull` here
+# but $INSTALL_DIR is not a git repo (it's an extracted tarball), so the
+# "update" path silently did nothing.
+echo "📥 Downloading latest agent..."
+mkdir -p "$INSTALL_DIR"
+TAR_TMP=$(mktemp -t dev-dashboard-agent)
+curl -fsSL "$DASHBOARD_URL/api/agent/download" -o "$TAR_TMP" || {
+  echo "❌ Could not download agent package from $DASHBOARD_URL/api/agent/download"
+  rm -f "$TAR_TMP"
+  exit 1
+}
+
+# Wipe everything except node_modules / .env / logs so removed-in-newer-version
+# files don't linger. Tarball excludes .env, so it would not be overwritten,
+# but we still preserve it explicitly here for safety.
+echo "🧹 Cleaning previous install (preserving .env, node_modules, logs)..."
+find "$INSTALL_DIR" -mindepth 1 -maxdepth 1 \
+  ! -name 'node_modules' \
+  ! -name '.env' \
+  ! -name '.env.local' \
+  ! -name 'agent.log' \
+  ! -name 'agent.error.log' \
+  -exec rm -rf {} +
+
+tar -xzf "$TAR_TMP" -C "$INSTALL_DIR"
+rm -f "$TAR_TMP"
 
 cd "$INSTALL_DIR"
 pnpm install --frozen-lockfile 2>/dev/null || pnpm install
 
-# Config
+# Config — only write a fresh .env on first install. On updates we keep the
+# existing one so user customizations (PROJECT_PATHS, AGENT_NAME, etc.)
+# survive.
 CLAUDE_BIN=$(command -v claude 2>/dev/null || true)
 
-cat > "$INSTALL_DIR/.env" <<EOF
+if [ ! -f "$INSTALL_DIR/.env" ]; then
+  cat > "$INSTALL_DIR/.env" <<EOF
 DASHBOARD_URL=$DASHBOARD_URL
 AGENT_TOKEN=$AGENT_TOKEN
 AGENT_NAME=$(scutil --get ComputerName 2>/dev/null || hostname)
@@ -67,19 +108,41 @@ AGENT_PORT=3939
 PROJECT_PATHS=$HOME/projects,$HOME/Desktop/Projects
 EOF
 
-if [ -n "$CLAUDE_BIN" ]; then
-  echo "CLAUDE_PATH=$CLAUDE_BIN" >> "$INSTALL_DIR/.env"
-  echo "✓ Claude CLI: $CLAUDE_BIN"
+  if [ -n "$CLAUDE_BIN" ]; then
+    echo "CLAUDE_PATH=$CLAUDE_BIN" >> "$INSTALL_DIR/.env"
+    echo "✓ Claude CLI: $CLAUDE_BIN"
+  else
+    echo "⚠ Claude CLI not found in PATH — chat feature disabled until you install it"
+  fi
+
+  echo "✓ Configuration created"
 else
-  echo "⚠ Claude CLI not found in PATH — chat feature disabled until you install it"
+  echo "✓ Existing .env preserved (delete it and re-run to regenerate)"
 fi
 
-echo "✓ Configuration saved"
+# Drop a one-shot updater so the user never has to remember the curl command.
+cat > "$INSTALL_DIR/update.sh" <<'UPDATE_EOF'
+#!/bin/bash
+# Re-runs the installer reusing existing .env values.
+set -e
+INSTALL_DIR="$HOME/.dev-dashboard-agent"
+if [ ! -f "$INSTALL_DIR/.env" ]; then
+  echo "❌ $INSTALL_DIR/.env not found — agent does not seem to be installed"
+  exit 1
+fi
+DASHBOARD_URL=$(grep -E '^DASHBOARD_URL=' "$INSTALL_DIR/.env" | head -n1 | cut -d= -f2-)
+AGENT_TOKEN=$(grep -E '^AGENT_TOKEN=' "$INSTALL_DIR/.env" | head -n1 | cut -d= -f2-)
+if [ -z "$DASHBOARD_URL" ] || [ -z "$AGENT_TOKEN" ]; then
+  echo "❌ Could not read DASHBOARD_URL / AGENT_TOKEN from $INSTALL_DIR/.env"
+  exit 1
+fi
+echo "⬆ Updating Dev Dashboard Agent from $DASHBOARD_URL..."
+curl -fsSL "$DASHBOARD_URL/install/mac" | bash -s -- "$DASHBOARD_URL" "$AGENT_TOKEN"
+UPDATE_EOF
+chmod +x "$INSTALL_DIR/update.sh"
 
 # launchd plist
-PLIST="$HOME/Library/LaunchAgents/com.devdashboard.agent.plist"
 mkdir -p "$HOME/Library/LaunchAgents"
-
 NODE_PATH=$(which node)
 
 cat > "$PLIST" <<EOF
@@ -118,14 +181,33 @@ cat > "$PLIST" <<EOF
 </plist>
 EOF
 
-launchctl unload "$PLIST" 2>/dev/null || true
 launchctl load "$PLIST"
+
+NEW_VERSION=$(grep -E '"version"' "$INSTALL_DIR/package.json" | head -n1 | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+
+# Wait briefly for the agent to spit out its startup banner so the user can
+# verify the new version actually loaded (not a stale process).
+sleep 2
+BANNER=""
+if [ -f "$INSTALL_DIR/agent.log" ]; then
+  BANNER=$(grep -E '🔧 Dev Dashboard Agent' "$INSTALL_DIR/agent.log" | tail -n1)
+fi
 
 echo ""
 echo "──────────────────────────────────────────"
-echo "✅ Agent installed and running!"
+if [ -n "$PREV_VERSION" ] && [ "$PREV_VERSION" != "$NEW_VERSION" ]; then
+  echo "✅ Agent updated: v$PREV_VERSION → v$NEW_VERSION"
+elif [ -n "$PREV_VERSION" ]; then
+  echo "✅ Agent reinstalled (v$NEW_VERSION)"
+else
+  echo "✅ Agent installed and running (v$NEW_VERSION)"
+fi
+if [ -n "$BANNER" ]; then
+  echo "Running:   $BANNER"
+fi
 echo ""
 echo "Logs:      tail -f $INSTALL_DIR/agent.log"
+echo "Update:    bash $INSTALL_DIR/update.sh   (or re-run this same curl command)"
 echo "Stop:      launchctl unload $PLIST"
 echo "Start:     launchctl load $PLIST"
 echo "Uninstall: bash $INSTALL_DIR/uninstall.sh"

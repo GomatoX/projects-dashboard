@@ -109,6 +109,16 @@ export type AgentCommand =
       maxTurns?: number;
       claudePath?: string;
       permissions: ClaudePermissionConfig;
+      // ─── Attachments (images, PDFs, …) ──────────────────
+      // The dashboard's filesystem is unreachable from the device, so we
+      // ship metadata over the socket and let the agent fetch the bytes
+      // via HTTP from the dashboard. The prompt contains placeholders of
+      // the form `__ATTACHMENT_<index>__` (matching the indices below);
+      // the agent rewrites them into device-local absolute paths *before*
+      // calling the SDK so the multimodal Read tool can open them.
+      attachments?: ClaudeAttachment[];
+      chatId?: string;
+      projectId?: string;
     }
   | { type: 'CLAUDE_CANCEL'; id: string; sessionId: string }
   | {
@@ -380,6 +390,25 @@ export interface GitLogEntry {
 //                     `autoAllowTools`. Bash commands matching any string
 //                     in `denyPatterns` are denied outright (e.g. `rm -rf /`).
 export type ClaudePermissionMode = 'bypass' | 'readOnly' | 'interactive';
+
+/**
+ * Attachment metadata sent with CLAUDE_QUERY to the device. The bytes
+ * themselves stay on the dashboard's disk — the agent downloads them on
+ * demand from `/api/projects/{projectId}/chat/{chatId}/attachments/{filename}`.
+ *
+ * `filename` is the on-disk name (nanoid-prefixed, safe for path joins);
+ * `name` is the original user-facing name we surface in the prompt. The
+ * `placeholder` is the literal token (`__ATTACHMENT_0__`, etc.) that the
+ * agent must replace with the device-local absolute path before invoking
+ * the SDK. Keeping the placeholder explicit here means the dashboard owns
+ * the index/name pairing and the agent doesn't have to guess.
+ */
+export interface ClaudeAttachment {
+  filename: string;
+  name: string;
+  type: string;
+  placeholder: string;
+}
 
 export interface ClaudePermissionConfig {
   mode: ClaudePermissionMode;
