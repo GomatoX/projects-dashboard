@@ -16,6 +16,7 @@ import {
   Box,
   ActionIcon,
   Tooltip,
+  Alert,
 } from '@mantine/core';
 import { modals } from '@mantine/modals';
 import { notify } from '@/lib/notify';
@@ -83,6 +84,9 @@ export function PM2Panel({ projectId, pm2Name, deviceId }: PM2PanelProps) {
   const [processes, setProcesses] = useState<PM2Process[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [error, setError] = useState<{ status: number; message: string } | null>(
+    null,
+  );
   const pollRef = useRef<NodeJS.Timeout | null>(null);
 
   const fetchProcesses = useCallback(async () => {
@@ -92,14 +96,27 @@ export function PM2Panel({ projectId, pm2Name, deviceId }: PM2PanelProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'PM2_LIST' }),
       });
-      if (!res.ok) return;
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        setError({
+          status: res.status,
+          message:
+            (data && typeof data.error === 'string' && data.error) ||
+            `Request failed (${res.status})`,
+        });
+        return;
+      }
 
       if (data.type === 'PM2_LIST_RESULT') {
         setProcesses(data.processes);
+        setError(null);
       }
-    } catch {
-      // Ignore fetch errors
+    } catch (e) {
+      setError({
+        status: 0,
+        message: e instanceof Error ? e.message : 'Network error',
+      });
     } finally {
       setLoading(false);
     }
@@ -188,6 +205,42 @@ export function PM2Panel({ projectId, pm2Name, deviceId }: PM2PanelProps) {
           <Text c="dimmed">No device assigned to this project</Text>
         </Stack>
       </Center>
+    );
+  }
+
+  if (error && processes.length === 0) {
+    const isDeviceOffline =
+      error.status === 404 && /device/i.test(error.message);
+    return (
+      <Stack gap="md">
+        <Alert
+          variant="light"
+          color={isDeviceOffline ? 'yellow' : 'red'}
+          icon={<IconAlertTriangle size={18} />}
+          title={
+            isDeviceOffline
+              ? 'Device is not connected'
+              : `PM2 request failed${error.status ? ` (HTTP ${error.status})` : ''}`
+          }
+        >
+          <Text size="sm">{error.message}</Text>
+          {isDeviceOffline && (
+            <Text size="xs" c="dimmed" mt={4}>
+              Start the agent on the device, then retry.
+            </Text>
+          )}
+        </Alert>
+        <Group>
+          <Button
+            size="xs"
+            variant="light"
+            leftSection={<IconRefresh size={14} />}
+            onClick={fetchProcesses}
+          >
+            Retry
+          </Button>
+        </Group>
+      </Stack>
     );
   }
 

@@ -31,26 +31,36 @@ export function PM2LogViewer({ projectId, processName }: PM2LogViewerProps) {
   const [logs, setLogs] = useState<string[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const autoScrollRef = useRef(true);
 
   // Load initial logs
   const loadLogs = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const res = await fetch(`/api/projects/${projectId}/pm2`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'PM2_LOGS', name: processName, lines: 100 }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        setError(
+          (data && typeof data.error === 'string' && data.error) ||
+            `Request failed (HTTP ${res.status})`,
+        );
+        return;
+      }
 
       if (data.type === 'PM2_LOGS_RESULT' && data.logs) {
         const lines = data.logs.split('\n').filter((l: string) => l.trim());
         setLogs(lines.slice(-MAX_LOG_LINES));
       }
-    } catch {
-      // Ignore
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Network error');
     } finally {
       setLoading(false);
     }
@@ -135,7 +145,11 @@ export function PM2LogViewer({ projectId, processName }: PM2LogViewerProps) {
           }}
         >
           <Box p="sm" style={{ fontFamily: 'monospace', fontSize: 12, lineHeight: 1.6 }}>
-            {logs.length === 0 ? (
+            {error ? (
+              <Text size="xs" c="red" ta="center" py="xl">
+                Failed to load logs: {error}
+              </Text>
+            ) : logs.length === 0 ? (
               <Text size="xs" c="dimmed" ta="center" py="xl">
                 No logs available. Click Refresh to load.
               </Text>

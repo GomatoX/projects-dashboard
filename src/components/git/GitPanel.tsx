@@ -10,12 +10,15 @@ import {
   Tabs,
   ThemeIcon,
   Badge,
+  Alert,
+  Button,
 } from '@mantine/core';
 import {
   IconGitBranch,
   IconGitCommit,
   IconHistory,
   IconAlertTriangle,
+  IconRefresh,
 } from '@tabler/icons-react';
 import type { GitStatus, GitBranch, GitLogEntry } from '@/lib/socket/types';
 import { GitStatusPanel } from './GitStatusPanel';
@@ -33,6 +36,9 @@ export function GitPanel({ projectId, projectPath, deviceId }: GitPanelProps) {
   const [branches, setBranches] = useState<GitBranch[]>([]);
   const [history, setHistory] = useState<GitLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<{ status: number; message: string } | null>(
+    null,
+  );
 
   const gitCommand = useCallback(
     async (type: string, payload: Record<string, unknown> = {}) => {
@@ -41,7 +47,16 @@ export function GitPanel({ projectId, projectPath, deviceId }: GitPanelProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type, ...payload }),
       });
-      return res.json();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const message =
+          (data && typeof data.error === 'string' && data.error) ||
+          `Request failed (${res.status})`;
+        const err = new Error(message) as Error & { status?: number };
+        err.status = res.status;
+        throw err;
+      }
+      return data;
     },
     [projectId],
   );
@@ -69,8 +84,18 @@ export function GitPanel({ projectId, projectPath, deviceId }: GitPanelProps) {
 
   const refreshAll = useCallback(async () => {
     setLoading(true);
-    await Promise.all([refreshStatus(), refreshBranches(), refreshHistory()]);
-    setLoading(false);
+    setError(null);
+    try {
+      await Promise.all([refreshStatus(), refreshBranches(), refreshHistory()]);
+    } catch (e) {
+      const err = e as Error & { status?: number };
+      setError({
+        status: err.status ?? 0,
+        message: err.message || 'Git request failed',
+      });
+    } finally {
+      setLoading(false);
+    }
   }, [refreshStatus, refreshBranches, refreshHistory]);
 
   useEffect(() => {
@@ -97,6 +122,42 @@ export function GitPanel({ projectId, projectPath, deviceId }: GitPanelProps) {
       <Center h={300}>
         <Loader color="brand" type="dots" size="lg" />
       </Center>
+    );
+  }
+
+  if (error) {
+    const isDeviceOffline =
+      error.status === 404 && /device/i.test(error.message);
+    return (
+      <Stack gap="md">
+        <Alert
+          variant="light"
+          color={isDeviceOffline ? 'yellow' : 'red'}
+          icon={<IconAlertTriangle size={18} />}
+          title={
+            isDeviceOffline
+              ? 'Device is not connected'
+              : `Git request failed${error.status ? ` (HTTP ${error.status})` : ''}`
+          }
+        >
+          <Text size="sm">{error.message}</Text>
+          {isDeviceOffline && (
+            <Text size="xs" c="dimmed" mt={4}>
+              Start the agent on the device, then retry.
+            </Text>
+          )}
+        </Alert>
+        <Group>
+          <Button
+            size="xs"
+            variant="light"
+            leftSection={<IconRefresh size={14} />}
+            onClick={refreshAll}
+          >
+            Retry
+          </Button>
+        </Group>
+      </Stack>
     );
   }
 
