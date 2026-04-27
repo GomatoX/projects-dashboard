@@ -47,6 +47,9 @@ export async function markStreamStart(
     if (!ok) return false; // already active
     bump(activeChatStreams, chatId);
   }
+  // Order matters: if startJournal rejected the chat above, we already
+  // returned without bumping the project count — the caller will 409
+  // the request, so no new stream actually started.
   bump(activeProjectStreams, projectId);
   return true;
 }

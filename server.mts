@@ -22,6 +22,8 @@ app.prepare().then(async () => {
   const { hashAgentToken, timingSafeEqualHex } = await import('./src/lib/auth/agent-token.js');
   const { crashRecovery } = await import('./src/lib/ai/event-journal.js');
 
+  // Seal any journals left 'active' by a previous Next.js process so
+  // /stream/subscribe sees a clean ended state. MUST run before listen().
   await crashRecovery();
 
   const httpServer = createServer(handler);
