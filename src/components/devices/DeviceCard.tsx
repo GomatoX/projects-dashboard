@@ -103,7 +103,7 @@ export function DeviceCard({
               size="xl"
               radius="md"
               variant="light"
-              color={isOnline ? 'teal' : 'gray'}
+              color={isOnline ? 'green' : 'gray'}
               className={classes.icon}
             >
               <OsIcon size={22} />
@@ -113,11 +113,14 @@ export function DeviceCard({
                 <Text fw={600} size="md">
                   {name}
                 </Text>
-                <span
-                  className={`status-dot ${
-                    isOnline ? 'status-dot--online' : 'status-dot--offline'
-                  }`}
-                />
+                <Tooltip label={isOnline ? 'Connected' : 'Offline'} withArrow>
+                  <span
+                    className={`status-dot status-dot--lg ${
+                      isOnline ? 'status-dot--online' : 'status-dot--offline'
+                    }`}
+                    aria-label={isOnline ? 'Connected' : 'Offline'}
+                  />
+                </Tooltip>
               </Group>
               <Text size="xs" c="dimmed">
                 {osLabels[os] || os} {localIp && `• ${localIp}`}
@@ -188,7 +191,7 @@ export function DeviceCard({
                       ? 'red'
                       : systemStats.memory.usagePercent > 60
                         ? 'yellow'
-                        : 'teal'
+                        : 'green'
                   }
                   radius="xl"
                 />
@@ -200,8 +203,16 @@ export function DeviceCard({
         <Group gap="xs">
           <Badge
             size="sm"
-            variant="dot"
-            color={isOnline ? 'teal' : 'gray'}
+            variant={isOnline ? 'light' : 'outline'}
+            color={isOnline ? 'green' : 'gray'}
+            leftSection={
+              <span
+                className={`status-dot ${
+                  isOnline ? 'status-dot--online' : 'status-dot--offline'
+                }`}
+                style={{ width: 6, height: 6 }}
+              />
+            }
           >
             {isOnline ? 'Connected' : 'Offline'}
           </Badge>

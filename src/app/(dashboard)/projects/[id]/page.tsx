@@ -31,6 +31,7 @@ import {
   IconTerminal,
   IconHistory,
   IconBolt,
+  IconSparkles,
 } from '@tabler/icons-react';
 import { PROJECT_TYPE_ICONS } from '@/lib/constants';
 import { PM2Panel } from '@/components/pm2/PM2Panel';
@@ -42,6 +43,7 @@ import { GitHubPanel } from '@/components/github/GitHubPanel';
 import { TerminalPanel } from '@/components/terminal/TerminalPanel';
 import { ClaudeSessionsPanel } from '@/components/claude/ClaudeSessionsPanel';
 import { CommandsPanel } from '@/components/commands/CommandsPanel';
+import { SkillsPanel } from '@/components/skills/SkillsPanel';
 
 interface Project {
   id: string;
@@ -174,6 +176,9 @@ export default function ProjectDetailPage() {
           <Tabs.Tab value="commands" leftSection={<IconBolt size={16} />}>
             Commands
           </Tabs.Tab>
+          <Tabs.Tab value="skills" leftSection={<IconSparkles size={16} />}>
+            Skills
+          </Tabs.Tab>
           <Tabs.Tab value="terminal" leftSection={<IconTerminal size={16} />}>
             Terminal
           </Tabs.Tab>
@@ -293,6 +298,10 @@ export default function ProjectDetailPage() {
 
         <Tabs.Panel value="commands" style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
           <CommandsPanel projectId={project.id} deviceId={project.deviceId} />
+        </Tabs.Panel>
+
+        <Tabs.Panel value="skills" style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+          <SkillsPanel projectId={project.id} deviceId={project.deviceId} />
         </Tabs.Panel>
 
         <Tabs.Panel value="terminal" style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>

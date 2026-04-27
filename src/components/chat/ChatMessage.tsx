@@ -323,7 +323,10 @@ function AttachmentTile({ attachment }: { attachment: StoredAttachment }) {
           <IconFile size={16} />
         )}
         <Box style={{ minWidth: 0 }}>
-          <Text size="xs" lineClamp={1} c="gray.2">
+          {/* `gray.2` is `#e9ecef` — invisible on white in light mode. Use the
+              default body text color so this stays high-contrast in both
+              schemes. */}
+          <Text size="xs" lineClamp={1}>
             {displayName}
           </Text>
           {typeof size === 'number' && (

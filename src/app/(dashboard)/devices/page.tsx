@@ -152,7 +152,17 @@ export default function DevicesPage() {
               Devices
             </Title>
             {onlineCount > 0 && (
-              <Badge size="md" variant="light" color="teal">
+              <Badge
+                size="md"
+                variant="light"
+                color="green"
+                leftSection={
+                  <span
+                    className="status-dot status-dot--online"
+                    style={{ width: 6, height: 6 }}
+                  />
+                }
+              >
                 {onlineCount} online
               </Badge>
             )}
@@ -164,7 +174,7 @@ export default function DevicesPage() {
         <Group gap="sm">
           <Button
             component={Link}
-            href="/devices/setup"
+            href="/guides/device-setup"
             variant="subtle"
             color="gray"
             size="sm"

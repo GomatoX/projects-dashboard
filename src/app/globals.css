@@ -19,22 +19,38 @@
        white surfaces "lift" off the page. Doing the remap at the CSS
        variable level lets every existing `var(--mantine-color-dark-X)`
        reference keep working in both schemes without touching components. */
-[data-mantine-color-scheme='light'] {
+/* NOTE: must use `:root[data-mantine-color-scheme='light']` (specificity 0,1,1)
+   AND `!important` on palette tokens so we reliably outrank Mantine's own
+   `:root` palette declarations injected from `@mantine/core/styles.css`
+   (specificity 0,1,0) — and any runtime CSS-in-JS Mantine may inject after
+   our globals.css. Without this, the dark palette tuple from theme.ts
+   continues to apply even when scheme === 'light'. */
+:root[data-mantine-color-scheme='light'] {
   /* Inverted tone mapping — index 0 was lightest in dark scheme (text on
      dark bg), so in light scheme it must become the darkest color
-     (text on light bg). */
-  --mantine-color-dark-0: #1a1b1e; /* primary text */
-  --mantine-color-dark-1: #495057; /* secondary text */
-  --mantine-color-dark-2: #6c757d; /* muted text */
-  --mantine-color-dark-3: #adb5bd; /* subtle / outline borders */
-  --mantine-color-dark-4: #dee2e6; /* card borders */
-  --mantine-color-dark-5: #e9ecef; /* input borders / dividers */
-  --mantine-color-dark-6: #f1f3f5; /* card hover bg */
-  --mantine-color-dark-7: #ffffff; /* card / surface bg */
-  --mantine-color-dark-8: #ffffff; /* sidebar / header bg */
-  --mantine-color-dark-9: #f6f8fa; /* main / page bg (subtle off-white) */
+     (text on light bg).
+     ─── Light palette (GitHub-inspired) ───
+     The ChatPanel and many other components use `dark-6` as a *border* (not
+     just hover background). The original mapping made dark-6 nearly invisible
+     on white — which is why subpanels appeared to bleed into one another.
+     The values below are tuned so dark-4..dark-6 are all visible on white,
+     while still preserving a clear hierarchy:
+       6 = subtle border / hover bg
+       5 = standard border / divider
+       4 = strong border (rarely used)
+     This keeps existing components readable without per-file edits. */
+  --mantine-color-dark-0: #1f2328 !important; /* primary text (near-black) */
+  --mantine-color-dark-1: #57606a !important; /* secondary text */
+  --mantine-color-dark-2: #6e7781 !important; /* muted text */
+  --mantine-color-dark-3: #8c959f !important; /* subtle text / icons */
+  --mantine-color-dark-4: #afb8c1 !important; /* strong border */
+  --mantine-color-dark-5: #d0d7de !important; /* standard border / divider */
+  --mantine-color-dark-6: #e1e4e8 !important; /* subtle border + hover bg */
+  --mantine-color-dark-7: #ffffff !important; /* card / surface bg */
+  --mantine-color-dark-8: #ffffff !important; /* sidebar / header bg */
+  --mantine-color-dark-9: #f6f8fa !important; /* main / page bg (subtle off-white) */
 
-  /* Decorative tokens */
+  /* Decorative tokens (no !important needed — only declared in our globals.css) */
   --glass-bg: rgba(255, 255, 255, 0.7);
   --glass-border: rgba(0, 0, 0, 0.08);
   --glass-shadow: 0 8px 32px rgba(15, 23, 42, 0.08);
@@ -46,16 +62,16 @@
 
 /* Add a subtle drop shadow + crisp border to Cards in light mode so they
    visually separate from the off-white body background. */
-[data-mantine-color-scheme='light'] .mantine-Card-root {
+:root[data-mantine-color-scheme='light'] .mantine-Card-root {
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.03);
 }
 
 /* Right border on sidebar / bottom border on header in light mode so the
    white-on-white surfaces still have a visible edge. */
-[data-mantine-color-scheme='light'] .mantine-AppShell-navbar {
+:root[data-mantine-color-scheme='light'] .mantine-AppShell-navbar {
   border-right-color: var(--mantine-color-dark-4) !important;
 }
-[data-mantine-color-scheme='light'] .mantine-AppShell-header {
+:root[data-mantine-color-scheme='light'] .mantine-AppShell-header {
   border-bottom-color: var(--mantine-color-dark-4) !important;
 }
 
@@ -89,7 +105,7 @@ code {
   font-size: 0.875em;
 }
 
-[data-mantine-color-scheme='light'] code {
+:root[data-mantine-color-scheme='light'] code {
   /* Brand-3 is too light against off-white; use deeper shade instead. */
   color: var(--mantine-color-brand-8);
 }
@@ -153,6 +169,14 @@ code {
   flex-shrink: 0;
 }
 
+/* Larger variant with a contrasting ring so the dot reads clearly on any
+   surface — used in DeviceCard headline next to the device name. */
+.status-dot--lg {
+  width: 12px;
+  height: 12px;
+  border: 2px solid light-dark(var(--mantine-color-white), var(--mantine-color-dark-7));
+}
+
 .status-dot--online {
   background-color: #40c057;
   box-shadow: 0 0 8px rgba(64, 192, 87, 0.4);
@@ -160,7 +184,8 @@ code {
 }
 
 .status-dot--offline {
-  background-color: var(--mantine-color-dark-3);
+  /* dark-3 light = #8c959f, dark = #5c5e7a — both readable on their bg */
+  background-color: light-dark(#9ca3af, var(--mantine-color-dark-3));
 }
 
 @keyframes pulse-green {

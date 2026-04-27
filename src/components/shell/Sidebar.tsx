@@ -192,19 +192,19 @@ export function Sidebar({ pathname, onNavigate }: SidebarProps) {
 
         <NavLink
           component={Link}
-          href="/devices/setup"
-          label="Setup Guide"
+          href="/guides"
+          label="Guides"
           leftSection={
             <ThemeIcon
-              variant={pathname === '/devices/setup' ? 'light' : 'subtle'}
-              color={pathname === '/devices/setup' ? 'brand' : 'gray'}
+              variant={pathname.startsWith('/guides') ? 'light' : 'subtle'}
+              color={pathname.startsWith('/guides') ? 'brand' : 'gray'}
               size="md"
               radius="md"
             >
               <IconBook size={16} />
             </ThemeIcon>
           }
-          active={pathname === '/devices/setup'}
+          active={pathname.startsWith('/guides')}
           className={classes.navLink}
           onClick={onNavigate}
           styles={{

@@ -69,8 +69,25 @@ export async function POST(
       );
     }
     const agentManager = getAgentManager();
-    if (!agentManager || !agentManager.isDeviceConnected(project.deviceId)) {
-      return NextResponse.json({ error: 'Agent not connected' }, { status: 503 });
+    if (!agentManager) {
+      console.warn('[skills/execute] agentManager missing on globalThis');
+      return NextResponse.json(
+        { error: 'Agent manager not initialized — restart the server' },
+        { status: 503 },
+      );
+    }
+    if (!agentManager.isDeviceConnected(project.deviceId)) {
+      const connected = agentManager.getConnectedDevices().map((d) => d.deviceId);
+      console.warn(
+        `[skills/execute] device ${project.deviceId} not in connectedAgents`,
+        { connected },
+      );
+      return NextResponse.json(
+        {
+          error: `Agent not connected (project device: ${project.deviceId.slice(0, 8)}…, connected: ${connected.length === 0 ? 'none' : connected.map((d) => d.slice(0, 8)).join(', ')})`,
+        },
+        { status: 503 },
+      );
     }
 
     try {

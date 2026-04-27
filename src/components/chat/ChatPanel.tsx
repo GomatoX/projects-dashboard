@@ -726,7 +726,11 @@ export function ChatPanel({ projectId, deviceId }: ChatPanelProps) {
                       <Text
                         size="xs"
                         lineClamp={1}
-                        c={chat.id === activeChat ? 'gray.2' : 'dimmed'}
+                        // Active chat title uses the default body text color so
+                        // it stays high-contrast in both schemes. (`gray.2` is
+                        // `#e9ecef` — invisible on white in light mode.)
+                        c={chat.id === activeChat ? undefined : 'dimmed'}
+                        fw={chat.id === activeChat ? 600 : 400}
                         style={{ flex: 1 }}
                       >
                         {chat.title}
