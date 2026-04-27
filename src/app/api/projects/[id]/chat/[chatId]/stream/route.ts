@@ -17,6 +17,10 @@ import { createPermissionRequest } from '@/lib/ai/permission-store';
 import { markStreamStart, markStreamEnd, isChatActive } from '@/lib/ai/active-streams';
 import { appendEvent } from '@/lib/ai/event-journal';
 import {
+  registerLocalAbort,
+  unregisterLocalAbort,
+} from '@/lib/ai/local-cancel';
+import {
   DEFAULT_CLAUDE_PERMISSIONS,
   type AgentCommand,
   type ClaudePermissionConfig,
@@ -324,7 +328,19 @@ function handleLocalStream(args: StreamArgs) {
         }
       };
 
-      let fullContent = '';
+      // Each "turn" is one assistant message. A single chat-level turn can
+      // produce multiple SDK turns when tools are used: deltas → assistant →
+      // tool_use → tool_result → deltas → assistant → … The previous code
+      // collapsed everything into a single string, which (a) discarded all
+      // but the last turn's text on the server (the `fullContent = turnText`
+      // overwrite below was the bug) and (b) made the live streaming display
+      // visually merge consecutive turns ("Let me check…" + "Here it is")
+      // with no separator. We track turns explicitly and emit a `turn_break`
+      // event between them so the client can insert `\n\n` in its live
+      // buffer; the journal stores the same break so reattaching subscribers
+      // see the identical separators.
+      const completedTurns: string[] = [];
+      let currentTurnDeltas = '';
       const toolUses: Array<{
         id: string;
         toolName: string;
@@ -335,11 +351,33 @@ function handleLocalStream(args: StreamArgs) {
       let inputTokens = 0;
       let outputTokens = 0;
 
+      // AbortController for the SDK `query()`. Registered in the per-chat
+      // map so the /cancel endpoint can abort us from another request. The
+      // SDK propagates abort through its async iterator, which surfaces
+      // here as either a thrown AbortError (clean break) or the iterator
+      // simply ending — both paths land in `finally` for cleanup.
+      const abortController = new AbortController();
+      registerLocalAbort(chatId, abortController);
+      // `aborted` lets the catch / finally blocks distinguish a user-driven
+      // cancel from a real failure, so we surface a clean `done` event
+      // (with whatever partial content arrived) instead of an error toast.
+      let aborted = false;
+      abortController.signal.addEventListener('abort', () => {
+        aborted = true;
+      });
+      // We deliberately do NOT subscribe to `request.signal` here — a
+      // tab/page navigation should leave the agent running so the user
+      // can come back via /stream/subscribe (mirrors the remote handler's
+      // documented behavior at the bottom of this file). The /cancel
+      // endpoint calls `abortLocal(chatId)` to flip the SDK controller
+      // when the user explicitly clicks Stop.
+
       try {
 
         const agentQuery = query({
           prompt: fullPrompt,
           options: {
+            abortController,
             pathToClaudeCodeExecutable:
               process.env.CLAUDE_PATH || `${process.env.HOME}/.local/bin/claude`,
             cwd: project.path,
@@ -401,14 +439,26 @@ function handleLocalStream(args: StreamArgs) {
               const textBlocks = assistantMsg.message.content.filter(
                 (b) => b.type === 'text',
               );
-              // Always capture the complete text from assistant turn
+              // Always capture the complete text from assistant turn. We
+              // prefer the SDK-canonical turn text over the concatenated
+              // deltas — they should match, but if a delta was dropped we
+              // want the full turn text to be saved.
               const turnText = textBlocks
                 .map((b) => (b.type === 'text' ? b.text : ''))
                 .join('');
               if (turnText) {
-                // Use assistant turn text as authoritative (in case streaming missed it)
-                fullContent = turnText;
+                completedTurns.push(turnText);
+                // Tell the client this turn is done. The next turn (after
+                // any tool calls) will start fresh, so the live buffer
+                // needs `\n\n` between them. We always emit — a trailing
+                // turn_break at the very end is harmless (it just adds
+                // empty trailing space in the live bubble, which the
+                // refetch on `done` overwrites with the persisted row).
+                await writeEvent(safeEnqueue, encoder, chatId, {
+                  type: 'turn_break',
+                });
               }
+              currentTurnDeltas = '';
               // Extract tool use info
               const toolBlocks = assistantMsg.message.content.filter(
                 (b) => b.type === 'tool_use',
@@ -433,11 +483,15 @@ function handleLocalStream(args: StreamArgs) {
               inputTokens = resultMsg.usage.input_tokens;
               outputTokens = resultMsg.usage.output_tokens;
 
-              if (resultMsg.subtype === 'success' && resultMsg.result) {
-                // Use result text if available and fullContent is still empty
-                if (!fullContent) {
-                  fullContent = resultMsg.result;
-                }
+              if (
+                resultMsg.subtype === 'success' &&
+                resultMsg.result &&
+                completedTurns.length === 0
+              ) {
+                // No assistant turns observed (rare — bypass path). Use
+                // the result text as a single synthetic turn so we still
+                // persist something.
+                completedTurns.push(resultMsg.result);
               }
               break;
             }
@@ -450,7 +504,7 @@ function handleLocalStream(args: StreamArgs) {
               if (event.type === 'content_block_delta') {
                 const delta = event.delta;
                 if (delta.type === 'text_delta' && delta.text) {
-                  fullContent += delta.text;
+                  currentTurnDeltas += delta.text;
                   await writeEvent(safeEnqueue, encoder, chatId, { type: 'text', text: delta.text });
                 }
               }
@@ -463,6 +517,19 @@ function handleLocalStream(args: StreamArgs) {
           }
         }
 
+        // If the loop exited mid-turn (abort or max_turns hit between
+        // assistant messages), salvage whatever deltas we did receive so
+        // they aren't lost from the persisted record.
+        if (currentTurnDeltas.trim().length > 0) {
+          completedTurns.push(currentTurnDeltas);
+          currentTurnDeltas = '';
+        }
+
+        // Authoritative full content for DB / done event. Joining with a
+        // blank line between turns mirrors what the live streaming buffer
+        // displays after consuming `turn_break` events.
+        const fullContent = completedTurns.join('\n\n');
+
         // Persist the assistant row BEFORE signaling done. The client's
         // done handler refetches /messages so the optimistic streaming
         // bubble is replaced by the canonical row (which includes
@@ -471,7 +538,7 @@ function handleLocalStream(args: StreamArgs) {
         // and the refetch would see a stale message list.
         if (fullContent) {
           console.log(
-            `[Chat] Saving assistant message: ${assistantMsgId}, content length: ${fullContent.length}`,
+            `[Chat] Saving assistant message: ${assistantMsgId}, content length: ${fullContent.length}, aborted: ${aborted}`,
           );
           try {
             await db.insert(chatMessages).values({
@@ -508,28 +575,47 @@ function handleLocalStream(args: StreamArgs) {
           }
         }
 
-        // Send done event
+        // Done event — `aborted: true` lets the client distinguish a
+        // user-cancelled turn from a normal completion (e.g. to skip
+        // the success chime).
         await writeEvent(safeEnqueue, encoder, chatId, {
           type: 'done',
           messageId: assistantMsgId,
           tokensIn: inputTokens,
           tokensOut: outputTokens,
           cost: totalCost,
+          aborted,
         });
       } catch (error) {
-        console.error('[Chat] Stream error:', error);
-        const errorMsg =
+        // AbortError surfaces here when the SDK observed the controller
+        // flip. Treat as a clean stop, not a failure — persist whatever
+        // turns we collected and emit `done` with `aborted: true`.
+        const errMsg =
           error instanceof Error ? error.message : 'AI request failed';
-        // Best-effort persist any partial content the agent produced
-        // before the error. If the try block already inserted the row,
-        // the PK collision is caught and ignored — the row is in DB.
-        if (fullContent) {
+        const isAbort =
+          aborted ||
+          abortController.signal.aborted ||
+          (error instanceof Error &&
+            (error.name === 'AbortError' || /aborted/i.test(error.message)));
+        if (!isAbort) {
+          console.error('[Chat] Stream error:', error);
+        }
+
+        if (currentTurnDeltas.trim().length > 0) {
+          completedTurns.push(currentTurnDeltas);
+        }
+        const partialContent = completedTurns.join('\n\n');
+
+        // Best-effort persist whatever the agent managed to produce
+        // (works for both real errors and aborts). If the try block
+        // already inserted the row, PK collision is caught and ignored.
+        if (partialContent) {
           try {
             await db.insert(chatMessages).values({
               id: assistantMsgId,
               chatId,
               role: 'assistant',
-              content: fullContent,
+              content: partialContent,
               toolUses: JSON.stringify(toolUses),
               proposedChanges: '[]',
               attachments: '[]',
@@ -539,12 +625,27 @@ function handleLocalStream(args: StreamArgs) {
               timestamp: new Date(),
             });
           } catch {
-            // Either already persisted in the try block or PK collision;
-            // both are fine — the row is in DB.
+            // Either already persisted or PK collision; both are fine.
           }
         }
-        await writeEvent(safeEnqueue, encoder, chatId, { type: 'error', message: errorMsg });
+
+        if (isAbort) {
+          await writeEvent(safeEnqueue, encoder, chatId, {
+            type: 'done',
+            messageId: assistantMsgId,
+            tokensIn: inputTokens,
+            tokensOut: outputTokens,
+            cost: totalCost,
+            aborted: true,
+          });
+        } else {
+          await writeEvent(safeEnqueue, encoder, chatId, {
+            type: 'error',
+            message: errMsg,
+          });
+        }
       } finally {
+        unregisterLocalAbort(chatId);
         await markStreamEnd(projectId, chatId);
         safeClose();
       }
@@ -662,6 +763,13 @@ function handleRemoteStream(args: StreamArgs) {
 
       // ─── Stream state ──────────────────────────────────
       let fullContent = '';
+      // The remote (device-side) agent does not emit turn boundaries —
+      // we infer them: any tool_use event flips this flag on, the next
+      // CLAUDE_TEXT consumes it (emits a turn_break first, prepends \n\n
+      // into the persisted content). Mirrors the explicit `turn_break`
+      // emission in the local handler so the live bubble in the UI shows
+      // the same paragraph spacing in both modes.
+      let pendingTurnBreak = false;
       const toolUses: Array<{
         id: string;
         toolName: string;
@@ -688,6 +796,16 @@ function handleRemoteStream(args: StreamArgs) {
         switch (type) {
           case 'CLAUDE_TEXT': {
             const text = event.text as string;
+            // First text after a tool_use → that's a fresh assistant turn,
+            // insert a paragraph break so it doesn't visually merge with
+            // whatever the agent said before invoking the tool.
+            if (pendingTurnBreak) {
+              pendingTurnBreak = false;
+              fullContent += '\n\n';
+              await writeEvent(safeEnqueue, encoder, chatId, {
+                type: 'turn_break',
+              });
+            }
             fullContent += text;
             await writeEvent(safeEnqueue, encoder, chatId, { type: 'text', text });
             break;
@@ -706,6 +824,12 @@ function handleRemoteStream(args: StreamArgs) {
             } else {
               toolUses.push({ id: toolUseId, toolName, input, status: toolStatus });
             }
+
+            // Any tool activity arms the turn-break — the next CLAUDE_TEXT
+            // is the start of a new turn. We only need to arm it once per
+            // run of consecutive tool events; the consumer (CLAUDE_TEXT)
+            // disarms it.
+            pendingTurnBreak = true;
 
             // Translate to the SSE shape ChatPanel already understands
             await writeEvent(safeEnqueue, encoder, chatId, {
