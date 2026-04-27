@@ -252,14 +252,21 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
         return;
       }
       if (event.type === 'done') {
+        streaming.end(chatId);
         if (activeChatRef.current === chatId) {
-          fetchMessages(chatId);
+          // Refetch messages so the persisted assistant row replaces the
+          // live bubble, THEN clear the live state. Doing both in this
+          // order avoids a flash where the bubble disappears before the
+          // persisted row has rendered.
+          fetchMessages(chatId).then(() => {
+            streaming.clear(chatId);
+          });
+        } else {
+          // Not the active chat — no bubble to flash. Clear immediately.
+          streaming.clear(chatId);
         }
         fetchChats();
         playSound('taskComplete');
-        // The persisted assistant row is now in `msgs`; drop the live
-        // streaming state so we don't double-render.
-        streaming.clear(chatId);
         return;
       }
       if (event.type === 'error') {
