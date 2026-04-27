@@ -329,12 +329,18 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
           return;
         }
 
-        // Initialise the streaming slice ONCE up front so handleSubscribedEvent
-        // can append without checking `cur.active` (that check would read a
-        // stale `byChat` snapshot captured at effect mount and trigger a
-        // content-wiping reset on every delta — see the comment in
-        // handleSubscribedEvent).
-        streaming.begin(chatId);
+        // Initialise the streaming slice ONLY when this is a truly fresh
+        // subscribe (since=0). On a continuation — e.g. Fast Refresh or any
+        // remount that preserved the StreamingStateProvider — the slice
+        // already holds the content streamed by the previous subscribe and
+        // the server is replaying only events past `lastEventSeq`. Calling
+        // begin() here would wipe that pre-remount content and the user
+        // would only see the small tail that arrives after this subscribe
+        // opens. handleSubscribedEvent doesn't depend on `active` after the
+        // earlier stale-closure cleanup, so leaving the slice as-is is safe.
+        if (since === 0) {
+          streaming.begin(chatId);
+        }
 
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
