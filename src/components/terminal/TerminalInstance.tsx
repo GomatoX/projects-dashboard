@@ -8,7 +8,7 @@ import '@xterm/xterm/css/xterm.css';
 interface TerminalInstanceProps {
   projectId: string;
   sessionId: string;
-  onExit?: () => void;
+  onExit?: (exitCode?: number) => void;
 }
 
 export function TerminalInstance({
@@ -123,8 +123,11 @@ export function TerminalInstance({
         if (parsed.type === 'output') {
           term.write(parsed.data);
         } else if (parsed.type === 'exit') {
-          term.writeln('\r\n\x1b[90m[Process exited]\x1b[0m');
-          onExit?.();
+          const code = typeof parsed.exitCode === 'number' ? parsed.exitCode : undefined;
+          term.writeln(
+            `\r\n\x1b[90m[Process exited${code !== undefined ? ` with code ${code}` : ''}]\x1b[0m`,
+          );
+          onExit?.(code);
         }
       } catch {
         // Ignore parse errors

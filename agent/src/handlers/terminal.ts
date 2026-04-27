@@ -6,6 +6,11 @@ const sessions = new Map<string, pty.IPty>();
 
 /**
  * Spawn a new PTY session.
+ *
+ * If `command` is provided, the shell is spawned with `-c <command>` so it
+ * runs that command and exits. This is used by the Commands panel to stream
+ * output of long-running tasks (e.g. `pnpm dev`) through the same
+ * TERMINAL_OUTPUT / TERMINAL_EXIT pipeline used for interactive sessions.
  */
 export function handleTerminalSpawn(
   socket: Socket,
@@ -14,6 +19,7 @@ export function handleTerminalSpawn(
   cwd: string,
   cols: number,
   rows: number,
+  command?: string,
 ) {
   // Kill existing session with same ID
   if (sessions.has(sessionId)) {
@@ -22,9 +28,10 @@ export function handleTerminalSpawn(
   }
 
   const shell = process.env.SHELL || '/bin/zsh';
+  const args = command ? ['-l', '-c', command] : [];
 
   try {
-    const ptyProcess = pty.spawn(shell, [], {
+    const ptyProcess = pty.spawn(shell, args, {
       name: 'xterm-256color',
       cols,
       rows,
@@ -64,7 +71,11 @@ export function handleTerminalSpawn(
       sessionId,
     });
 
-    console.log(`🖥️  Terminal spawned: ${sessionId} (${shell} in ${cwd})`);
+    if (command) {
+      console.log(`🖥️  Terminal spawned (cmd): ${sessionId} → ${command} in ${cwd}`);
+    } else {
+      console.log(`🖥️  Terminal spawned: ${sessionId} (${shell} in ${cwd})`);
+    }
   } catch (error) {
     socket.emit('event', {
       type: 'COMMAND_ERROR',

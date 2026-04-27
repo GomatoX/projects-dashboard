@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { projects, devices, chats } from '@/lib/db/schema';
-import { eq, desc, and, gt } from 'drizzle-orm';
+import { projects, devices } from '@/lib/db/schema';
+import { eq } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
+import { getActiveProjectIds } from '@/lib/ai/active-streams';
 
 export async function GET() {
   try {
@@ -25,15 +26,10 @@ export async function GET() {
       .leftJoin(devices, eq(projects.deviceId, devices.id))
       .orderBy(projects.name);
 
-    // Check for active chats (updated in the last 24h)
-    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const recentChats = await db
-      .select({ projectId: chats.projectId })
-      .from(chats)
-      .where(gt(chats.updatedAt, oneDayAgo))
-      .groupBy(chats.projectId);
-
-    const activeProjectIds = new Set(recentChats.map((c) => c.projectId));
+    // Active = there is currently a streaming chat in flight for this
+    // project. Tracked in-memory by the chat stream route, so the
+    // indicator clears as soon as the AI finishes (no stale 24h window).
+    const activeProjectIds = getActiveProjectIds();
 
     const enriched = allProjects.map((p) => ({
       ...p,

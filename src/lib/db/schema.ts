@@ -1,22 +1,41 @@
-import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, real, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 // ─── Devices ──────────────────────────────────────────────
-export const devices = sqliteTable('devices', {
-  id: text('id').primaryKey(),
-  name: text('name').notNull(),
-  os: text('os', { enum: ['linux', 'darwin', 'windows'] }).notNull(),
-  agentToken: text('agent_token').notNull(),
-  localIp: text('local_ip').notNull().default(''),
-  status: text('status', { enum: ['online', 'offline'] })
-    .notNull()
-    .default('offline'),
-  lastSeen: integer('last_seen', { mode: 'timestamp' }),
-  projectPaths: text('project_paths').notNull().default('[]'),
-  capabilities: text('capabilities').notNull().default('[]'),
-  createdAt: integer('created_at', { mode: 'timestamp' })
-    .notNull()
-    .$defaultFn(() => new Date()),
-});
+//
+// Auth token storage uses two columns:
+//   - tokenHash:  SHA-256 of the raw token. Indexed, used for O(1) lookup
+//                 on every Socket.io connection. Safe because raw tokens are
+//                 high-entropy nanoid(32), so a fast hash is not vulnerable
+//                 to brute force the way a user password would be.
+//   - agentToken: legacy bcrypt hash. Kept for devices created before the
+//                 tokenHash column existed; the auth middleware lazily
+//                 backfills tokenHash on the first successful login.
+//
+// New devices get both. Once all rows have tokenHash populated, the bcrypt
+// fallback path can be removed.
+export const devices = sqliteTable(
+  'devices',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    os: text('os', { enum: ['linux', 'darwin', 'windows'] }).notNull(),
+    agentToken: text('agent_token').notNull(),
+    tokenHash: text('token_hash'),
+    localIp: text('local_ip').notNull().default(''),
+    status: text('status', { enum: ['online', 'offline'] })
+      .notNull()
+      .default('offline'),
+    lastSeen: integer('last_seen', { mode: 'timestamp' }),
+    projectPaths: text('project_paths').notNull().default('[]'),
+    capabilities: text('capabilities').notNull().default('[]'),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (t) => ({
+    tokenHashIdx: uniqueIndex('devices_token_hash_idx').on(t.tokenHash),
+  }),
+);
 
 // ─── Projects ─────────────────────────────────────────────
 export const projects = sqliteTable('projects', {
@@ -28,6 +47,7 @@ export const projects = sqliteTable('projects', {
   pm2Name: text('pm2_name'),
   github: text('github'),
   tags: text('tags').notNull().default('[]'),
+  commands: text('commands').notNull().default('[]'),
   createdAt: integer('created_at', { mode: 'timestamp' })
     .notNull()
     .$defaultFn(() => new Date()),

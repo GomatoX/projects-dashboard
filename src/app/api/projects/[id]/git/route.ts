@@ -3,6 +3,11 @@ import { nanoid } from 'nanoid';
 import { db } from '@/lib/db';
 import { projects } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
+import {
+  GIT_COMMAND_ALLOWLIST,
+  buildAllowedCommand,
+} from '@/lib/socket/command-allowlist';
+import type { AgentCommand } from '@/lib/socket/types';
 
 type AgentManagerModule = typeof import('@/lib/socket/agent-manager');
 
@@ -17,10 +22,6 @@ export async function POST(
   try {
     const { id: projectId } = await params;
     const body = await request.json();
-
-    if (!body.type) {
-      return NextResponse.json({ error: 'Command type is required' }, { status: 400 });
-    }
 
     const [project] = await db.select().from(projects).where(eq(projects.id, projectId));
     if (!project) {
@@ -40,15 +41,22 @@ export async function POST(
       return NextResponse.json({ error: 'Device is not connected' }, { status: 404 });
     }
 
-    // Inject projectPath from DB if not provided
-    const command = {
-      ...body,
-      id: nanoid(),
-      projectPath: body.projectPath || project.path,
-    };
+    // Whitelist: client never controls projectPath — it always comes from the
+    // project record. Unknown command types and stray fields are dropped.
+    const built = buildAllowedCommand(body, GIT_COMMAND_ALLOWLIST, {
+      projectPath: project.path,
+    });
+    if (!built.ok) {
+      return NextResponse.json({ error: built.error }, { status: built.status });
+    }
 
-    // Git push/pull can be slow
-    const timeout = ['GIT_PUSH', 'GIT_PULL', 'GIT_FETCH'].includes(body.type) ? 30000 : 15000;
+    // Cast: buildAllowedCommand has already validated `type` and the field
+    // shape against the allowlist, so the value is structurally an AgentCommand.
+    const command = { ...built.command, id: nanoid() } as unknown as AgentCommand;
+
+    // Git push/pull/fetch can be slow
+    const slowTypes = new Set(['GIT_PUSH', 'GIT_PULL', 'GIT_FETCH']);
+    const timeout = slowTypes.has(command.type) ? 30000 : 15000;
     const response = await agentManager.sendCommand(project.deviceId, command, timeout);
 
     return NextResponse.json(response);

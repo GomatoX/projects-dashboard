@@ -12,6 +12,7 @@ import { chats, chatMessages, projects, projectMemory } from '@/lib/db/schema';
 import { eq, asc } from 'drizzle-orm';
 import { shouldAutoAllow, getToolMeta } from '@/lib/ai/tools';
 import { createPermissionRequest } from '@/lib/ai/permission-store';
+import { markStreamStart, markStreamEnd } from '@/lib/ai/active-streams';
 
 export async function POST(
   request: NextRequest,
@@ -114,6 +115,14 @@ export async function POST(
     async start(controller) {
       sseController = controller;
       let closed = false;
+
+      // Register this project + chat as having an active streaming session.
+      // The project entry feeds the sidebar "in progress" loader; the chat
+      // entry lets the chat panel itself recover the "Thinking..." indicator
+      // after a page refresh (the original SSE connection dies with the page,
+      // but the agent turn keeps running here). Always paired with
+      // markStreamEnd in the finally block below.
+      markStreamStart(projectId, chatId);
 
       const safeEnqueue = (data: Uint8Array) => {
         if (!closed) {
@@ -348,6 +357,7 @@ export async function POST(
           }
         }
 
+        markStreamEnd(projectId, chatId);
         safeClose();
       }
     },

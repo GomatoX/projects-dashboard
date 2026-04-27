@@ -3,6 +3,11 @@ import { nanoid } from 'nanoid';
 import { db } from '@/lib/db';
 import { projects } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
+import {
+  FILE_COMMAND_ALLOWLIST,
+  buildAllowedCommand,
+} from '@/lib/socket/command-allowlist';
+import type { AgentCommand } from '@/lib/socket/types';
 
 type AgentManagerModule = typeof import('@/lib/socket/agent-manager');
 
@@ -17,10 +22,6 @@ export async function POST(
   try {
     const { id: projectId } = await params;
     const body = await request.json();
-
-    if (!body.type) {
-      return NextResponse.json({ error: 'Command type is required' }, { status: 400 });
-    }
 
     const [project] = await db.select().from(projects).where(eq(projects.id, projectId));
     if (!project) {
@@ -40,13 +41,20 @@ export async function POST(
       return NextResponse.json({ error: 'Device is not connected' }, { status: 404 });
     }
 
-    const command = {
-      ...body,
-      id: nanoid(),
-    };
+    // Whitelist: drop unknown fields, inject project-trusted ones server-side.
+    const built = buildAllowedCommand(body, FILE_COMMAND_ALLOWLIST, {
+      projectPath: project.path,
+    });
+    if (!built.ok) {
+      return NextResponse.json({ error: built.error }, { status: built.status });
+    }
+
+    // Cast: buildAllowedCommand has already validated `type` and the field
+    // shape against the allowlist, so the value is structurally an AgentCommand.
+    const command = { ...built.command, id: nanoid() } as unknown as AgentCommand;
 
     // Longer timeout for search operations
-    const timeout = body.type === 'SEARCH_CODEBASE' ? 20000 : 15000;
+    const timeout = command.type === 'SEARCH_CODEBASE' ? 20000 : 15000;
     const response = await agentManager.sendCommand(project.deviceId, command, timeout);
 
     return NextResponse.json(response);

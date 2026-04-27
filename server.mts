@@ -4,7 +4,7 @@ import { Server as SocketIOServer } from 'socket.io';
 import bcrypt from 'bcrypt';
 
 const dev = process.env.NODE_ENV !== 'production';
-const hostname = '0.0.0.0';
+const hostname = process.env.HOST || (dev ? '127.0.0.1' : '0.0.0.0');
 const port = parseInt(process.env.PORT || '3000', 10);
 
 const app = next({ dev, hostname, port });
@@ -14,8 +14,9 @@ app.prepare().then(async () => {
   // Dynamic imports for modules that use the DB
   const { db } = await import('./src/lib/db/index.js');
   const { devices } = await import('./src/lib/db/schema.js');
-  const { eq } = await import('drizzle-orm');
+  const { eq, isNull } = await import('drizzle-orm');
   const agentManager = await import('./src/lib/socket/agent-manager.js');
+  const { hashAgentToken, timingSafeEqualHex } = await import('./src/lib/auth/agent-token.js');
 
   const httpServer = createServer(handler);
 
@@ -27,6 +28,10 @@ app.prepare().then(async () => {
   });
 
   // ─── Socket.io Authentication Middleware ───────────────
+  // Fast path: look the device up by an indexed SHA-256 of the token.
+  // Slow path: legacy devices created before the tokenHash column existed
+  // still have only a bcrypt hash; scan only those rows and lazily backfill
+  // tokenHash on the first successful match so subsequent connects are fast.
   io.use(async (socket, next) => {
     try {
       const auth = socket.handshake.auth as { token?: string; hostname?: string; os?: string };
@@ -35,16 +40,46 @@ app.prepare().then(async () => {
         return next(new Error('Authentication token required'));
       }
 
-      // Find a device whose hashed token matches
-      const allDevices = await db.select().from(devices);
+      const candidateHash = hashAgentToken(auth.token);
 
-      let matchedDevice: typeof allDevices[0] | null = null;
+      let matchedDevice: typeof devices.$inferSelect | null = null;
 
-      for (const device of allDevices) {
-        const isMatch = await bcrypt.compare(auth.token, device.agentToken);
-        if (isMatch) {
-          matchedDevice = device;
-          break;
+      const fastHits = await db
+        .select()
+        .from(devices)
+        .where(eq(devices.tokenHash, candidateHash))
+        .limit(1);
+
+      if (fastHits.length > 0 && fastHits[0].tokenHash) {
+        // timingSafeEqualHex is defensive — the WHERE clause already proves
+        // equality, but keeping the explicit constant-time compare protects
+        // against any future change to the lookup strategy.
+        if (timingSafeEqualHex(fastHits[0].tokenHash, candidateHash)) {
+          matchedDevice = fastHits[0];
+        }
+      }
+
+      if (!matchedDevice) {
+        const legacyDevices = await db
+          .select()
+          .from(devices)
+          .where(isNull(devices.tokenHash));
+
+        for (const device of legacyDevices) {
+          const isMatch = await bcrypt.compare(auth.token, device.agentToken);
+          if (isMatch) {
+            matchedDevice = device;
+            // Backfill the indexed hash so the next connect uses the fast path.
+            try {
+              await db
+                .update(devices)
+                .set({ tokenHash: candidateHash })
+                .where(eq(devices.id, device.id));
+            } catch (err) {
+              console.error('[Auth] Failed to backfill tokenHash:', err);
+            }
+            break;
+          }
         }
       }
 

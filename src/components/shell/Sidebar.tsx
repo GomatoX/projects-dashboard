@@ -14,12 +14,12 @@ import {
   ScrollArea,
   Tooltip,
   Skeleton,
+  Loader,
 } from '@mantine/core';
 import {
   IconSettings,
   IconActivity,
   IconFolder,
-  IconMessageCircle,
   IconBook,
 } from '@tabler/icons-react';
 import { NAV_ITEMS, PROJECT_TYPE_ICONS } from '@/lib/constants';
@@ -63,8 +63,9 @@ export function Sidebar({ pathname, onNavigate }: SidebarProps) {
 
   useEffect(() => {
     fetchProjects();
-    // Refresh every 30s to catch new chats
-    const timer = setInterval(fetchProjects, 30_000);
+    // Refresh every 5s so the "in progress" loader appears/disappears
+    // promptly after a chat starts or finishes streaming.
+    const timer = setInterval(fetchProjects, 5_000);
     return () => clearInterval(timer);
   }, [fetchProjects]);
 
@@ -155,15 +156,8 @@ export function Sidebar({ pathname, onNavigate }: SidebarProps) {
                           {project.name}
                         </Text>
                         {project.hasActiveChat && (
-                          <Tooltip label="Active chat session">
-                            <ThemeIcon
-                              size={14}
-                              variant="light"
-                              color="green"
-                              radius="xl"
-                            >
-                              <IconMessageCircle size={8} />
-                            </ThemeIcon>
+                          <Tooltip label="Chat is processing…">
+                            <Loader size={12} type="oval" color="brand" />
                           </Tooltip>
                         )}
                       </Group>

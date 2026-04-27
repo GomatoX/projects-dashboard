@@ -17,7 +17,7 @@ export async function POST(
 ) {
   const { id } = await params;
   const body = await request.json();
-  const { cols = 80, rows = 24 } = body;
+  const { cols = 80, rows = 24, command } = body;
 
   const [project] = await db.select().from(projects).where(eq(projects.id, id));
   if (!project) {
@@ -43,6 +43,7 @@ export async function POST(
       cwd: project.path,
       cols,
       rows,
+      ...(typeof command === 'string' && command.trim() ? { command } : {}),
     });
 
     return NextResponse.json({ sessionId });

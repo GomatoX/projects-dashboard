@@ -209,6 +209,7 @@ const { socket } = createConnection(config, {
         const { exec } = await import('child_process');
         const { promisify } = await import('util');
         const execAsync = promisify(exec);
+        const cmdStart = Date.now();
         try {
           const { stdout, stderr } = await execAsync(command.command, {
             cwd: command.projectPath,
@@ -216,17 +217,29 @@ const { socket } = createConnection(config, {
             maxBuffer: 1024 * 1024,
           });
           response = {
-            type: 'COMMAND_RESULT' as AgentEvent['type'],
+            type: 'COMMAND_RESULT',
             requestId: command.id,
             output: (stdout || '') + (stderr ? `\n${stderr}` : ''),
-          } as AgentEvent;
+            exitCode: 0,
+            durationMs: Date.now() - cmdStart,
+          };
         } catch (err: unknown) {
-          const error = err as { stdout?: string; stderr?: string; message?: string };
+          const error = err as {
+            stdout?: string;
+            stderr?: string;
+            message?: string;
+            code?: number;
+            killed?: boolean;
+          };
           response = {
-            type: 'COMMAND_RESULT' as AgentEvent['type'],
+            type: 'COMMAND_RESULT',
             requestId: command.id,
-            output: (error.stdout || '') + (error.stderr || error.message || 'Command failed'),
-          } as AgentEvent;
+            output:
+              (error.stdout || '') +
+              (error.stderr || error.message || 'Command failed'),
+            exitCode: typeof error.code === 'number' ? error.code : error.killed ? 124 : 1,
+            durationMs: Date.now() - cmdStart,
+          };
         }
         break;
       }
@@ -240,6 +253,7 @@ const { socket } = createConnection(config, {
           command.cwd,
           command.cols,
           command.rows,
+          command.command,
         );
         return; // Don't call respond — handler emits events directly
 

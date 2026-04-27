@@ -76,6 +76,12 @@ export type AgentCommand =
       cwd: string;
       cols: number;
       rows: number;
+      /**
+       * Optional one-shot command. When set, the agent spawns the shell with
+       * `-c <command>` so it runs the command and exits, instead of an
+       * interactive shell. Output still flows through TERMINAL_OUTPUT/EXIT.
+       */
+      command?: string;
     }
   | { type: 'TERMINAL_INPUT'; id: string; sessionId: string; data: string }
   | {
@@ -134,7 +140,13 @@ export type AgentEvent =
       success: boolean;
       message?: string;
     }
-  | { type: 'COMMAND_RESULT'; requestId: string; output: string }
+  | {
+      type: 'COMMAND_RESULT';
+      requestId: string;
+      output: string;
+      exitCode?: number;
+      durationMs?: number;
+    }
 
   // Terminal events
   | { type: 'TERMINAL_SPAWNED'; requestId: string; sessionId: string }

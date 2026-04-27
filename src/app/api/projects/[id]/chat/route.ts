@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { nanoid } from 'nanoid';
 import { db } from '@/lib/db';
-import { chats, chatMessages } from '@/lib/db/schema';
+import { chats } from '@/lib/db/schema';
 import { eq, desc } from 'drizzle-orm';
+import { isChatActive } from '@/lib/ai/active-streams';
 
-// GET /api/projects/[id]/chat — list all chats for a project
+// GET /api/projects/[id]/chat — list all chats for a project. Each chat is
+// annotated with `isStreaming` so the chat panel can render a per-chat
+// activity indicator (the chat list inside the panel doesn't drive its own
+// streams — it polls this endpoint for cross-tab / cross-session awareness).
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -17,7 +21,12 @@ export async function GET(
     .where(eq(chats.projectId, projectId))
     .orderBy(desc(chats.updatedAt));
 
-  return NextResponse.json(projectChats);
+  const annotated = projectChats.map((c) => ({
+    ...c,
+    isStreaming: isChatActive(c.id),
+  }));
+
+  return NextResponse.json(annotated);
 }
 
 // POST /api/projects/[id]/chat — create a new chat
