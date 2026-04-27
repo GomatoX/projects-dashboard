@@ -22,31 +22,85 @@ endpoint and the `turn_break` server-side emission are already in place.
 
 ## Design
 
-### Stop button (Send → Stop morph)
+### Stop button (header ActionIcon)
 
-`ChatInput.tsx`:
-- Add two props: `isStreaming: boolean`, `onStop: () => void`.
-- When `isStreaming` is true, render a Stop button in place of Send:
-  `IconPlayerStopFilled` from `@tabler/icons-react`, brand color, tooltip
-  "Stop". Click invokes `onStop()`.
-- When `isStreaming` is false, render the existing Send button unchanged.
-- Textarea and paperclip retain current behavior (disabled while streaming).
-  Allowing typing during a turn is out of scope for this change.
+> **Note:** The brainstorming session originally selected option A
+> (Send→Stop morph in `ChatInput`), but a previous work-in-progress
+> session had already implemented option B (header ActionIcon) before
+> this spec was written. The user reviewed both designs and accepted
+> option B as-shipped. This spec was updated post-hoc to match.
 
 `ChatPanel.tsx`:
-- Add `handleStop` callback:
-  - `POST /api/projects/{projectId}/chat/{activeChat}/cancel` with body
-    `{ sessionId: streaming.get(activeChat).sessionId ?? null }`.
-  - On non-OK response, surface a Mantine `notify` toast (red, "Stop
-    failed"). On success, do nothing — the existing `done` handler
-    already cleans up when the stream emits `aborted: true`.
-- Pass `isStreaming={activeShowsLiveTurn}` and `onStop={handleStop}` into
-  `<ChatInput>`. `disabled` continues to be `inputDisabled`
-  (= `activeShowsLiveTurn`).
+- Add a small red `ActionIcon` with `IconPlayerStopFilled` next to the
+  chat title in the header. Renders only when `activeShowsLiveTurn` is
+  true (= chat is locally OR server-side streaming).
+- Tooltip: "Stop generating" / "Stopping…" depending on state.
+- While the cancel request is in flight, show Mantine's built-in
+  `loading` state on the ActionIcon and disable further clicks.
+- Clicking calls `stopChat(activeChat)`.
+
+`stopChat(chatId)` performs two parallel teardown actions:
+
+1. **Client-side fetch abort.** A per-chat `AbortController` is
+   registered in `abortControllersRef` (a `Map<chatId, AbortController>`)
+   when `sendMessage` starts the POST `/stream` fetch. Aborting it tears
+   the SSE reader down immediately so the UI returns to idle without
+   waiting for the network round-trip to `/cancel`.
+2. **Server-side cancel POST.** `POST /api/projects/{projectId}/chat/{chatId}/cancel`
+   with body `{ sessionId }` when a remote-mode `sessionId` is captured,
+   otherwise `{}`. The endpoint flips the SDK `AbortController` (local
+   mode) or forwards `CLAUDE_CANCEL` to the device socket (remote mode).
+
+Failures are swallowed — the user's intent was "stop", and a toast
+saying "stop failed" after the bubble already disappeared would be more
+confusing than helpful. The local fetch teardown alone is enough to
+return the UI to a usable state.
+
+`cancellingChats` (a `Set<chatId>`) tracks in-flight stop requests so
+the button shows a spinner. It clears via:
+- The `sendMessage` `finally` block when the fetch reader exits (local
+  driver path).
+- A 4-second `setTimeout` fallback for the reattach path where no
+  `sendMessage` finally is running in this tab.
 
 The cancel endpoint is idempotent: repeated clicks while the stream is
-already winding down return `wasActive: false` without error, so we don't
-need a client-side debounce.
+already winding down return `wasActive: false` without error.
+
+### Stream route abort wiring
+
+`stream/route.ts` (`handleLocalStream`):
+- Create an `AbortController`, register it via
+  `registerLocalAbort(chatId, controller)` so the cancel endpoint can
+  flip it from a separate request.
+- Pass it into the SDK `query()` `options.abortController`.
+- Track an `aborted` boolean (set when the signal fires) so the catch
+  block can distinguish a user-driven cancel from a real failure.
+- On abort, persist whatever turns were collected and emit `done` with
+  `aborted: true` instead of `error`.
+- `unregisterLocalAbort(chatId)` in the `finally` block.
+
+The remote handler does not need its own abort wiring — `CLAUDE_CANCEL`
+forwarded over the socket is the analogue.
+
+### turn_break emission (server) and rendering (client)
+
+Server-side, both handlers emit `{ type: 'turn_break' }` between
+consecutive assistant turns:
+- **Local:** explicit emission after each non-empty `assistant` SDK
+  message in `handleLocalStream`. The same refactor moves from a
+  single-string `fullContent` (which the prior code's
+  `fullContent = turnText` overwrite was silently dropping earlier
+  turns from) to a `completedTurns: string[]` joined with `\n\n`.
+- **Remote:** the device agent does not signal turn boundaries, so we
+  infer them — a `pendingTurnBreak` flag arms when any `CLAUDE_TOOL_USE`
+  arrives, and the next `CLAUDE_TEXT` consumes it (prepending `\n\n` to
+  `fullContent` and emitting the `turn_break` SSE event).
+
+Client-side, `ChatPanel.tsx` adds a `turn_break` branch in both event
+handlers that calls `streaming.appendTurnBreak(chatId)`. The helper
+itself is added to `streaming-state.tsx` (was missing before this
+change). It is idempotent at boundaries — skips when content is empty
+or already ends with `\n\n`.
 
 ### turn_break event handler
 
@@ -71,14 +125,23 @@ redundant `turn_break` events from the server are harmless.
 
 ## Files changed
 
-- `src/components/chat/ChatInput.tsx` — add `isStreaming`, `onStop` props,
-  conditional Stop/Send button.
-- `src/components/chat/ChatPanel.tsx` — add `handleStop` function, pass
-  new props to `ChatInput`, handle `turn_break` in both stream readers.
+- `src/components/chat/ChatPanel.tsx` — header Stop `ActionIcon`,
+  `stopChat` callback, per-chat `abortControllersRef`,
+  `cancellingChats` state, `turn_break` branches in both event handlers.
+- `src/components/chat/streaming-state.tsx` — add `appendTurnBreak`
+  helper to the context.
+- `src/app/api/projects/[id]/chat/[chatId]/stream/route.ts` — register
+  the SDK `AbortController` with `local-cancel.ts`, abort-aware error
+  handling, `completedTurns[]` refactor, explicit `turn_break` emission
+  between assistant turns; remote handler infers turn boundaries from
+  tool use.
+- `src/lib/ai/local-cancel.ts` — new module: per-chat
+  `AbortController` registry consumed by the cancel endpoint.
+- `src/app/api/projects/[id]/chat/[chatId]/cancel/route.ts` — new
+  POST endpoint: dispatches to local abort (in-process) or forwards
+  `CLAUDE_CANCEL` to the device socket (remote).
 
-No new files. The already-untracked `src/lib/ai/local-cancel.ts` and
-`src/app/api/projects/[id]/chat/[chatId]/cancel/route.ts` will be committed
-together with the UI wiring (they are currently dead code without it).
+`ChatInput.tsx` is unchanged.
 
 ## Test plan
 
