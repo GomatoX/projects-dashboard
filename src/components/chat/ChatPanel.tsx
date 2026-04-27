@@ -258,7 +258,7 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
           // live bubble, THEN clear the live state. Doing both in this
           // order avoids a flash where the bubble disappears before the
           // persisted row has rendered.
-          fetchMessages(chatId).then(() => {
+          fetchMessages(chatId).finally(() => {
             streaming.clear(chatId);
           });
         } else {
@@ -341,7 +341,8 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
           if (cancelled) break;
 
           buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
+          // Split on \r?\n so we tolerate CRLF normalization by intermediaries.
+          const lines = buffer.split(/\r?\n/);
           buffer = lines.pop() ?? '';
 
           for (const line of lines) {

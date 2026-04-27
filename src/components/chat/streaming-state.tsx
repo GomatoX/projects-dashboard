@@ -176,9 +176,19 @@ export function StreamingStateProvider({ children }: { children: ReactNode }) {
 
   const end = useCallback(
     (chatId: string) => {
-      update(chatId, (s) => ({ ...s, active: false }));
+      // No-op when the slice has already been cleared. Without this guard,
+      // `update`'s `prev[chatId] ?? EMPTY_STATE` fallback would re-create a
+      // residual `{...EMPTY_STATE, active: false}` slice every time the
+      // stream finally-block ran after a successful `clear` in the done
+      // handler, leaking one map entry per turn.
+      setByChat((prev) => {
+        const cur = prev[chatId];
+        if (!cur) return prev;
+        if (cur.active === false) return prev;
+        return { ...prev, [chatId]: { ...cur, active: false } };
+      });
     },
-    [update],
+    [],
   );
 
   const clear = useCallback(
