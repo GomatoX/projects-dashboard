@@ -108,6 +108,13 @@ export async function startJournal(chatId: string): Promise<boolean> {
  * not see the failed event; live listeners did. The subscribe endpoint
  * tolerates non-contiguous seq because its dedupe is `seq <= lastSentSeq`,
  * which works correctly across gaps.
+ *
+ * Concurrency: seq assignment is atomic (synchronous reservation before
+ * the first await), so persisted seqs are always uniquely allocated in
+ * call order. But listener fan-out runs after the awaited DB insert, so
+ * if two `appendEvent` calls overlap, listeners may observe their events
+ * in commit order rather than seq order. Subscribers must dedupe/sort by
+ * `event.seq` rather than relying on listener arrival order.
  */
 export async function appendEvent(
   chatId: string,

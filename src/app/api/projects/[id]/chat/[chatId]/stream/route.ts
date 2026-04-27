@@ -294,8 +294,12 @@ function handleLocalStream(args: StreamArgs) {
           type: 'error',
           message: 'stream_already_active',
         });
-        controller.enqueue(encoder.encode(`data: ${json}\n\n`));
-        controller.close();
+        try {
+          controller.enqueue(encoder.encode(`data: ${json}\n\n`));
+          controller.close();
+        } catch {
+          // Request already aborted — nothing to write.
+        }
         return;
       }
 
@@ -548,8 +552,12 @@ function handleRemoteStream(args: StreamArgs) {
           type: 'error',
           message: 'stream_already_active',
         });
-        controller.enqueue(encoder.encode(`data: ${json}\n\n`));
-        controller.close();
+        try {
+          controller.enqueue(encoder.encode(`data: ${json}\n\n`));
+          controller.close();
+        } catch {
+          // Request already aborted — nothing to write.
+        }
         return;
       }
 
@@ -822,6 +830,11 @@ function handleRemoteStream(args: StreamArgs) {
       // socket listener here either: it must keep appending events to
       // the journal, and it self-detaches inside `onEvent` when CLAUDE_DONE
       // or CLAUDE_ERROR fires.
+      //
+      // Known gap: if the device disconnects without ever sending a
+      // terminal event (network partition, agent crash), `onEvent` stays
+      // attached and the journal stays `active` until the next server
+      // restart's `crashRecovery()` seals it. See task #12 for follow-up.
       request.signal.addEventListener('abort', () => {
         // Mark the response closed so safeEnqueue stops trying to write.
         // Do NOT call markStreamEnd, do NOT cancel the agent, do NOT
