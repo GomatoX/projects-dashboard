@@ -1,0 +1,361 @@
+// src/lib/ai/event-journal.ts
+//
+// Per-chat event journal backing the chat stream. Hybrid storage:
+//
+//   * SQLite (chat_stream_journals + chat_stream_events) is the durable
+//     source of truth. Survives Next.js HMR, dev server restart, full
+//     process crash. Used for snapshot replay by /stream/subscribe.
+//
+//   * Process-scoped Map<chatId, Set<listener>> is the live push channel.
+//     Lost on restart, which is fine — `crashRecovery()` at boot seals
+//     any orphaned `active` journals so subscribers see a clean ended
+//     state.
+//
+// Lifecycle:
+//   startJournal(chatId)   → upserts row to status='active', clears any
+//                            previous events, registers listener Set.
+//   appendEvent(chatId, d) → INSERT a row, then notify listeners.
+//   endJournal(chatId)     → UPDATE status='ended', flush nextSeq, fire
+//                            listener end-sentinel, schedule cleanup.
+//   getSnapshot(...)       → SELECT events > sinceSeq.
+//   subscribe(...)         → add listener to Set.
+//   crashRecovery()        → boot-time: any 'active' rows become 'ended'
+//                            with a synthetic error event appended.
+
+import { and, asc, eq, gt, lt } from 'drizzle-orm';
+import { db } from '@/lib/db';
+import { chatStreamEvents, chatStreamJournals } from '@/lib/db/schema';
+
+export type JournalEvent = {
+  /** Monotonic per-journal sequence number, starting at 1. */
+  seq: number;
+  /** The exact SSE `data:` payload (already-stringified JSON). */
+  data: string;
+};
+
+type JournalListener = (event: JournalEvent) => void;
+
+interface ActiveMeta {
+  chatId: string;
+  /** Authoritative sequence counter while the journal is active. */
+  nextSeq: number;
+  listeners: Set<JournalListener>;
+  /** Cleanup timer set by endJournal — stored so re-start can clear it. */
+  cleanupTimer: ReturnType<typeof setTimeout> | null;
+}
+
+const active = new Map<string, ActiveMeta>();
+
+/** How long after a stream ends we keep the journal rows for late readers. */
+const POST_END_RETENTION_MS = 30_000;
+
+/**
+ * Begin a fresh journal for the given chat. If a journal is already
+ * active in this process, returns false — the caller MUST refuse the
+ * new stream attempt with HTTP 409.
+ *
+ * Clears any previous events for this chatId. We treat each turn as a
+ * fresh recording — the persisted assistant message in `chat_messages`
+ * is the durable artefact; the journal is purely for "live replay
+ * during the turn".
+ */
+export async function startJournal(chatId: string): Promise<boolean> {
+  if (active.has(chatId)) return false;
+
+  await db.transaction(async (tx) => {
+    await tx.delete(chatStreamEvents).where(eq(chatStreamEvents.chatId, chatId));
+    // Upsert journal row to a fresh active state.
+    await tx
+      .insert(chatStreamJournals)
+      .values({
+        chatId,
+        status: 'active',
+        startedAt: new Date(),
+        endedAt: null,
+        nextSeq: 1,
+      })
+      .onConflictDoUpdate({
+        target: chatStreamJournals.chatId,
+        set: {
+          status: 'active',
+          startedAt: new Date(),
+          endedAt: null,
+          nextSeq: 1,
+        },
+      });
+  });
+
+  active.set(chatId, {
+    chatId,
+    nextSeq: 1,
+    listeners: new Set(),
+    cleanupTimer: null,
+  });
+  return true;
+}
+
+/**
+ * Append an event. Persists to SQLite, then notifies all live listeners.
+ * Returns the assigned event (with seq) or null if the journal is not
+ * active in this process.
+ *
+ * Live listeners ARE notified even if the DB insert throws — losing the
+ * persisted copy of one event is preferable to dropping a frame from
+ * the live UI. The error is logged so it shows up in the dev console.
+ */
+export async function appendEvent(
+  chatId: string,
+  data: string,
+): Promise<JournalEvent | null> {
+  const meta = active.get(chatId);
+  if (!meta) return null;
+
+  const seq = meta.nextSeq;
+  meta.nextSeq += 1;
+
+  try {
+    await db.insert(chatStreamEvents).values({
+      chatId,
+      seq,
+      data,
+      createdAt: new Date(),
+    });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[event-journal] persist failed', { chatId, seq, err });
+    // fall through — still notify listeners so the live UI sees the event
+  }
+
+  const event: JournalEvent = { seq, data };
+  for (const listener of meta.listeners) {
+    try {
+      listener(event);
+    } catch {
+      // listener errors must not break the journal
+    }
+  }
+  return event;
+}
+
+/**
+ * Mark the journal ended. Notifies listeners (so they flush + close)
+ * and schedules cleanup. Idempotent; safe to call from finally blocks.
+ */
+export async function endJournal(chatId: string): Promise<void> {
+  const meta = active.get(chatId);
+  if (!meta) return;
+  active.delete(chatId);
+
+  try {
+    await db
+      .update(chatStreamJournals)
+      .set({ status: 'ended', endedAt: new Date(), nextSeq: meta.nextSeq })
+      .where(eq(chatStreamJournals.chatId, chatId));
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[event-journal] endJournal persist failed', { chatId, err });
+  }
+
+  // Wake up listeners so they observe the end and detach.
+  for (const listener of meta.listeners) {
+    try {
+      listener({ seq: -1, data: '__END__' });
+    } catch {
+      // ignore
+    }
+  }
+  meta.listeners.clear();
+
+  meta.cleanupTimer = setTimeout(() => {
+    void deleteJournal(chatId).catch(() => {});
+  }, POST_END_RETENTION_MS);
+}
+
+async function deleteJournal(chatId: string): Promise<void> {
+  await db.transaction(async (tx) => {
+    await tx.delete(chatStreamEvents).where(eq(chatStreamEvents.chatId, chatId));
+    await tx
+      .delete(chatStreamJournals)
+      .where(eq(chatStreamJournals.chatId, chatId));
+  });
+}
+
+export interface JournalSnapshot {
+  status: 'active' | 'ended' | 'missing';
+  events: JournalEvent[];
+  /** Highest seq present in the journal (0 if none). */
+  latestSeq: number;
+  /** True if older events are missing from the snapshot. (Always false now — we don't truncate.) */
+  truncated: boolean;
+}
+
+/**
+ * Read all events with `seq > sinceSeq` from SQLite. If no journal row
+ * exists, returns status='missing'.
+ *
+ * Note: a snapshot can race against a concurrent `appendEvent` — events
+ * inserted after our SELECT runs are simply not in the snapshot. Callers
+ * that pair `getSnapshot` with `subscribe` rely on the listener fan-out
+ * to receive those events; the `lastSentSeq` dedupe in the subscribe
+ * endpoint protects against double-emission at the seam.
+ */
+export async function getSnapshot(
+  chatId: string,
+  sinceSeq = 0,
+): Promise<JournalSnapshot> {
+  const journals = await db
+    .select()
+    .from(chatStreamJournals)
+    .where(eq(chatStreamJournals.chatId, chatId))
+    .limit(1);
+  const journal = journals[0];
+  if (!journal) {
+    return { status: 'missing', events: [], latestSeq: 0, truncated: false };
+  }
+
+  const rows = await db
+    .select({ seq: chatStreamEvents.seq, data: chatStreamEvents.data })
+    .from(chatStreamEvents)
+    .where(
+      and(
+        eq(chatStreamEvents.chatId, chatId),
+        gt(chatStreamEvents.seq, sinceSeq),
+      ),
+    )
+    .orderBy(asc(chatStreamEvents.seq));
+
+  // For an active journal, nextSeq in DB is only synced on endJournal — use
+  // the in-memory counter when available so latestSeq reflects recent appends.
+  const inMemMeta = active.get(chatId);
+  const effectiveNextSeq = inMemMeta ? inMemMeta.nextSeq : journal.nextSeq;
+  const latestSeq = Math.max(0, effectiveNextSeq - 1);
+  const events: JournalEvent[] = rows.map((r) => ({ seq: r.seq, data: r.data }));
+
+  return {
+    status: journal.status,
+    events,
+    latestSeq,
+    truncated: false,
+  };
+}
+
+/**
+ * Subscribe to new events. The listener fires for each subsequent
+ * `appendEvent` and once with the sentinel `{seq:-1, data:'__END__'}`
+ * when the journal ends.
+ *
+ * Returns an unsubscribe function. If the journal is not active (either
+ * already ended or never started in this process), the listener is
+ * called immediately with the end sentinel.
+ *
+ * Caller is responsible for combining `getSnapshot` + `subscribe` so
+ * that:
+ *   1. subscribe BEFORE getSnapshot (so a concurrent appendEvent that
+ *      lands between the two calls is not lost),
+ *   2. dedupe by seq (the snapshot may overlap with the first listener
+ *      events).
+ */
+export function subscribe(
+  chatId: string,
+  listener: JournalListener,
+): () => void {
+  const meta = active.get(chatId);
+  if (!meta) {
+    queueMicrotask(() => listener({ seq: -1, data: '__END__' }));
+    return () => {};
+  }
+  meta.listeners.add(listener);
+  return () => {
+    meta.listeners.delete(listener);
+  };
+}
+
+/**
+ * Boot-time recovery. Any `active` journal in the DB is necessarily
+ * orphaned: the agent that was producing events died when the previous
+ * Next.js process exited.
+ *
+ * For each orphan we:
+ *   1. Append a synthetic error event so subscribers see a reason for
+ *      the abrupt end.
+ *   2. Flip status='ended' with endedAt=now.
+ *   3. Schedule cleanup (or delete immediately for very old journals).
+ *
+ * Also runs a sweep that drops journals ended longer ago than 1 hour —
+ * the in-process setTimeout cleanup wouldn't have fired across the
+ * restart.
+ */
+export async function crashRecovery(): Promise<void> {
+  const orphans = await db
+    .select()
+    .from(chatStreamJournals)
+    .where(eq(chatStreamJournals.status, 'active'));
+
+  for (const j of orphans) {
+    const errPayload = JSON.stringify({
+      type: 'error',
+      message: 'Stream interrupted by server restart',
+    });
+    try {
+      await db.transaction(async (tx) => {
+        // Append the error as the next event.
+        await tx.insert(chatStreamEvents).values({
+          chatId: j.chatId,
+          seq: j.nextSeq,
+          data: errPayload,
+          createdAt: new Date(),
+        });
+        await tx
+          .update(chatStreamJournals)
+          .set({
+            status: 'ended',
+            endedAt: new Date(),
+            nextSeq: j.nextSeq + 1,
+          })
+          .where(eq(chatStreamJournals.chatId, j.chatId));
+      });
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[event-journal] crashRecovery seal failed', {
+        chatId: j.chatId,
+        err,
+      });
+    }
+  }
+
+  // Sweep stale ended journals.
+  const cutoff = new Date(Date.now() - 60 * 60 * 1000);
+  const stale = await db
+    .select({ chatId: chatStreamJournals.chatId })
+    .from(chatStreamJournals)
+    .where(
+      and(
+        eq(chatStreamJournals.status, 'ended'),
+        lt(chatStreamJournals.endedAt, cutoff),
+      ),
+    );
+  for (const s of stale) {
+    try {
+      await deleteJournal(s.chatId);
+    } catch {
+      // best-effort
+    }
+  }
+
+  if (orphans.length > 0 || stale.length > 0) {
+    // eslint-disable-next-line no-console
+    console.log(
+      `[event-journal] crashRecovery: sealed ${orphans.length} orphan(s), pruned ${stale.length} stale journal(s)`,
+    );
+  }
+}
+
+/** Test/diagnostic only — do not use from request handlers. */
+export async function __resetJournalsForTest(): Promise<void> {
+  for (const meta of active.values()) {
+    if (meta.cleanupTimer) clearTimeout(meta.cleanupTimer);
+  }
+  active.clear();
+  await db.delete(chatStreamEvents);
+  await db.delete(chatStreamJournals);
+}
