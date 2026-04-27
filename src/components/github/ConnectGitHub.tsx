@@ -18,7 +18,7 @@ import {
   IconCheck,
   IconAlertTriangle,
 } from '@tabler/icons-react';
-import { notifications } from '@mantine/notifications';
+import { notify } from '@/lib/notify';
 
 interface ConnectGitHubProps {
   projectId: string;
@@ -49,7 +49,7 @@ export function ConnectGitHub({ projectId, onConnected }: ConnectGitHubProps) {
         return;
       }
 
-      notifications.show({
+      notify({
         title: 'Connected',
         message: `Linked to ${data.repo}`,
         color: 'teal',

@@ -17,7 +17,7 @@ import {
   Divider,
   ThemeIcon,
 } from '@mantine/core';
-import { notifications } from '@mantine/notifications';
+import { notify } from '@/lib/notify';
 import {
   IconRefresh,
   IconGitCommit,
@@ -74,7 +74,7 @@ export function GitStatusPanel({
   const handleStageFiles = async (files: string[]) => {
     const result = await gitCommand('GIT_STAGE', { files }) as { success?: boolean; message?: string };
     if (result.success) {
-      notifications.show({ title: 'Staged', message: `${files.length} file(s)`, color: 'teal', autoClose: 1500 });
+      notify({ title: 'Staged', message: `${files.length} file(s)`, color: 'teal', autoClose: 1500 });
       await onRefresh();
     }
   };
@@ -82,7 +82,7 @@ export function GitStatusPanel({
   const handleUnstageFiles = async (files: string[]) => {
     const result = await gitCommand('GIT_UNSTAGE', { files }) as { success?: boolean };
     if (result.success) {
-      notifications.show({ title: 'Unstaged', message: `${files.length} file(s)`, color: 'yellow', autoClose: 1500 });
+      notify({ title: 'Unstaged', message: `${files.length} file(s)`, color: 'yellow', autoClose: 1500 });
       await onRefresh();
     }
   };
@@ -107,11 +107,11 @@ export function GitStatusPanel({
       }) as { success?: boolean; message?: string };
 
       if (result.success) {
-        notifications.show({ title: 'Committed', message: result.message as string, color: 'teal' });
+        notify({ title: 'Committed', message: result.message as string, color: 'teal' });
         setCommitMessage('');
         await onRefresh();
       } else {
-        notifications.show({ title: 'Error', message: (result.message as string) || 'Commit failed', color: 'red' });
+        notify({ title: 'Error', message: (result.message as string) || 'Commit failed', color: 'red' });
       }
     } finally {
       setCommitting(false);
@@ -122,7 +122,7 @@ export function GitStatusPanel({
     setPushing(true);
     try {
       const result = await gitCommand('GIT_PUSH', { force: false }) as { success?: boolean; message?: string };
-      notifications.show({
+      notify({
         title: result.success ? 'Pushed' : 'Push Failed',
         message: result.message as string,
         color: result.success ? 'teal' : 'red',
@@ -137,7 +137,7 @@ export function GitStatusPanel({
     setPulling(true);
     try {
       const result = await gitCommand('GIT_PULL') as { success?: boolean; message?: string };
-      notifications.show({
+      notify({
         title: result.success ? 'Pulled' : 'Pull Failed',
         message: result.message as string,
         color: result.success ? 'teal' : 'red',

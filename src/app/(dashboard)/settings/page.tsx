@@ -5,24 +5,19 @@ import {
   Text,
   Card,
   Stack,
-  TextInput,
   PasswordInput,
   Button,
   Group,
-  Divider,
   Badge,
   SimpleGrid,
-  Slider,
-  Switch,
   Box,
 } from '@mantine/core';
 import {
-  IconSettings,
   IconKey,
-  IconVolume,
   IconInfoCircle,
   IconDeviceFloppy,
 } from '@tabler/icons-react';
+import { SoundSettings } from '@/components/settings/SoundSettings';
 
 export default function SettingsPage() {
   return (
@@ -93,37 +88,7 @@ export default function SettingsPage() {
         </Card>
 
         {/* Sound Settings */}
-        <Card>
-          <Stack gap="md">
-            <Group gap="sm">
-              <IconVolume size={20} style={{ opacity: 0.6 }} />
-              <Text size="sm" fw={600} tt="uppercase" c="dimmed">
-                Sound
-              </Text>
-            </Group>
-
-            <Box>
-              <Text size="sm" mb="xs">
-                Master Volume
-              </Text>
-              <Slider
-                defaultValue={70}
-                marks={[
-                  { value: 0, label: '0%' },
-                  { value: 50, label: '50%' },
-                  { value: 100, label: '100%' },
-                ]}
-                disabled
-              />
-            </Box>
-
-            <Switch label="Quiet Hours (22:00 - 08:00)" disabled />
-
-            <Text size="xs" c="dimmed">
-              Sound feedback coming soon.
-            </Text>
-          </Stack>
-        </Card>
+        <SoundSettings />
 
         {/* About */}
         <Card>

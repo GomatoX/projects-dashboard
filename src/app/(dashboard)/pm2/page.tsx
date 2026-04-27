@@ -19,7 +19,7 @@ import {
   Progress,
 } from '@mantine/core';
 import { modals } from '@mantine/modals';
-import { notifications } from '@mantine/notifications';
+import { notify } from '@/lib/notify';
 import {
   IconCpu,
   IconRefresh,
@@ -120,7 +120,7 @@ export default function PM2Page() {
 
       setDeviceProcesses(results);
     } catch {
-      notifications.show({
+      notify({
         title: 'Error',
         message: 'Failed to fetch PM2 processes',
         color: 'red',
@@ -149,14 +149,14 @@ export default function PM2Page() {
         body: JSON.stringify({ type: `PM2_${action.toUpperCase()}`, name }),
       });
       const data = await res.json();
-      notifications.show({
+      notify({
         title: `PM2 ${action}`,
         message: data.success ? `${name} ${action}ed` : (data.message || 'Failed'),
         color: data.success ? 'teal' : 'red',
       });
       setTimeout(fetchAll, 1000);
     } catch {
-      notifications.show({ title: 'Error', message: 'Command failed', color: 'red' });
+      notify({ title: 'Error', message: 'Command failed', color: 'red' });
     }
   };
 

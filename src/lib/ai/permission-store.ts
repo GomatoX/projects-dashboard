@@ -3,12 +3,14 @@
 // When canUseTool needs approval, it stores a Promise resolver here.
 // When the client POSTs to /permission, it resolves that Promise.
 
-import type { PermissionResult } from '@anthropic-ai/claude-agent-sdk';
+import type { PermissionResult, PermissionUpdate } from '@anthropic-ai/claude-agent-sdk';
 
 interface PendingPermission {
   resolve: (result: PermissionResult) => void;
   toolName: string;
+  toolUseId: string;
   input: Record<string, unknown>;
+  suggestions?: PermissionUpdate[];
   title?: string;
   description?: string;
   createdAt: number;
@@ -26,12 +28,15 @@ export function createPermissionRequest(
   input: Record<string, unknown>,
   title?: string,
   description?: string,
+  suggestions?: PermissionUpdate[],
 ): Promise<PermissionResult> {
   return new Promise<PermissionResult>((resolve) => {
     pendingPermissions.set(toolUseId, {
       resolve,
       toolName,
+      toolUseId,
       input,
+      suggestions,
       title,
       description,
       createdAt: Date.now(),
@@ -41,7 +46,11 @@ export function createPermissionRequest(
     setTimeout(() => {
       if (pendingPermissions.has(toolUseId)) {
         pendingPermissions.delete(toolUseId);
-        resolve({ behavior: 'deny', message: 'Permission request timed out' });
+        resolve({
+          behavior: 'deny',
+          message: 'Permission request timed out',
+          toolUseID: toolUseId,
+        });
       }
     }, 5 * 60 * 1000);
   });
@@ -59,9 +68,17 @@ export function resolvePermission(
 
   pendingPermissions.delete(toolUseId);
   if (decision === 'allow') {
-    pending.resolve({ behavior: 'allow' });
+    pending.resolve({
+      behavior: 'allow',
+      updatedPermissions: pending.suggestions,
+      toolUseID: pending.toolUseId,
+    });
   } else {
-    pending.resolve({ behavior: 'deny', message: 'User denied permission' });
+    pending.resolve({
+      behavior: 'deny',
+      message: 'User denied permission',
+      toolUseID: pending.toolUseId,
+    });
   }
   return true;
 }

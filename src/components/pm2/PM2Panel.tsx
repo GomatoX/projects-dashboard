@@ -18,7 +18,7 @@ import {
   Tooltip,
 } from '@mantine/core';
 import { modals } from '@mantine/modals';
-import { notifications } from '@mantine/notifications';
+import { notify } from '@/lib/notify';
 import {
   IconPlayerPlay,
   IconPlayerStop,
@@ -126,13 +126,13 @@ export function PM2Panel({ projectId, pm2Name, deviceId }: PM2PanelProps) {
       const data = await res.json();
 
       if (data.success) {
-        notifications.show({
+        notify({
           title: `PM2 ${action}`,
           message: data.message || `${name} ${action}ed`,
           color: 'teal',
         });
       } else {
-        notifications.show({
+        notify({
           title: 'PM2 Error',
           message: data.message || 'Action failed',
           color: 'red',
@@ -142,7 +142,7 @@ export function PM2Panel({ projectId, pm2Name, deviceId }: PM2PanelProps) {
       // Refresh after action
       setTimeout(fetchProcesses, 1000);
     } catch {
-      notifications.show({
+      notify({
         title: 'Error',
         message: `Failed to ${action} process`,
         color: 'red',

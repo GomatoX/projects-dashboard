@@ -28,7 +28,7 @@ import {
   IconTool,
   IconSparkles,
 } from '@tabler/icons-react';
-import { notifications } from '@mantine/notifications';
+import { notify } from '@/lib/notify';
 
 interface SessionMeta {
   id: string;
@@ -95,7 +95,7 @@ export function ClaudeSessionsPanel({ projectId }: ClaudeSessionsPanelProps) {
       const data = await res.json();
       setSessions(data.sessions || []);
     } catch {
-      notifications.show({
+      notify({
         title: 'Error',
         message: 'Failed to load Claude sessions',
         color: 'red',
@@ -126,7 +126,7 @@ export function ClaudeSessionsPanel({ projectId }: ClaudeSessionsPanelProps) {
       const data = await res.json();
       setSessionDetail(data);
     } catch {
-      notifications.show({
+      notify({
         title: 'Error',
         message: 'Failed to load session',
         color: 'red',

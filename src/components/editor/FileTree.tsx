@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import {
   Text,
   Group,
@@ -153,9 +153,11 @@ export function FileTree({
   }, [fetchDirectory, projectPath]);
 
   // Load on first render
-  if (!initialLoaded && !loading) {
-    loadRoot();
-  }
+  useEffect(() => {
+    if (!initialLoaded && !loading) {
+      loadRoot();
+    }
+  }, [initialLoaded, loading, loadRoot]);
 
   const toggleDirectory = async (node: TreeNode) => {
     const key = node.fullPath;

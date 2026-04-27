@@ -19,7 +19,7 @@ import {
   ThemeIcon,
   Tabs,
 } from '@mantine/core';
-import { notifications } from '@mantine/notifications';
+import { notify } from '@/lib/notify';
 import {
   IconBrain,
   IconDeviceFloppy,
@@ -69,7 +69,7 @@ export function MemoryPanel({ projectId }: MemoryPanelProps) {
       setMemory(data);
       setDirty(false);
     } catch {
-      notifications.show({ title: 'Error', message: 'Failed to load memory', color: 'red' });
+      notify({ title: 'Error', message: 'Failed to load memory', color: 'red' });
     }
   }, [projectId]);
 
@@ -100,10 +100,10 @@ export function MemoryPanel({ projectId }: MemoryPanelProps) {
         const updated = await res.json();
         setMemory({ ...memory, updatedAt: updated.updatedAt });
         setDirty(false);
-        notifications.show({ title: 'Saved', message: 'Project memory updated', color: 'teal', autoClose: 1500 });
+        notify({ title: 'Saved', message: 'Project memory updated', color: 'teal', autoClose: 1500 });
       }
     } catch {
-      notifications.show({ title: 'Error', message: 'Failed to save memory', color: 'red' });
+      notify({ title: 'Error', message: 'Failed to save memory', color: 'red' });
     } finally {
       setSaving(false);
     }

@@ -50,6 +50,7 @@ export interface ToolActivity {
   toolName: string;
   displayName: string;
   status: 'auto' | 'completed';
+  input?: Record<string, unknown>;
 }
 
 interface ToolApprovalCardProps {
@@ -67,10 +68,15 @@ const TOOL_ICONS: Record<string, typeof IconTool> = {
   Write: IconPencil,
   Edit: IconFileDiff,
   MultiEdit: IconFiles,
+  NotebookEdit: IconFileDiff,
   Glob: IconSearch,
   Grep: IconFileSearch,
+  WebSearch: IconSearch,
   Bash: IconTerminal,
   Task: IconRobot,
+  Skill: IconRobot,
+  TodoRead: IconFileText,
+  TodoWrite: IconPencil,
 };
 
 const TOOL_COLORS: Record<string, string> = {
@@ -79,10 +85,15 @@ const TOOL_COLORS: Record<string, string> = {
   Write: 'yellow',
   Edit: 'yellow',
   MultiEdit: 'yellow',
+  NotebookEdit: 'yellow',
   Glob: 'teal',
   Grep: 'teal',
+  WebSearch: 'teal',
   Bash: 'red',
   Task: 'grape',
+  Skill: 'grape',
+  TodoRead: 'cyan',
+  TodoWrite: 'yellow',
 };
 
 function formatInput(permission: PermissionRequest): string {
@@ -250,25 +261,57 @@ export function ToolApprovalCard({
   );
 }
 
-// ─── Compact tool activity badge (auto-allowed tools) ───
+// ─── Compact tool activity row (auto-allowed tools) ─────
 
 interface ToolActivityBadgeProps {
   activity: ToolActivity;
 }
 
+function formatActivityDetail(activity: ToolActivity): string {
+  const input = activity.input;
+  if (!input) return '';
+
+  // File tools — show filename
+  if (input.file_path || input.path) {
+    const fullPath = String(input.file_path || input.path);
+    const parts = fullPath.split('/');
+    return parts[parts.length - 1] || '';
+  }
+
+  // Search tools — show pattern
+  if (input.pattern) return String(input.pattern).slice(0, 40);
+  if (input.regex) return String(input.regex).slice(0, 40);
+
+  // Command tools
+  if (input.command) {
+    const cmd = String(input.command);
+    return cmd.length > 50 ? cmd.slice(0, 50) + '…' : cmd;
+  }
+
+  return '';
+}
+
 export function ToolActivityBadge({ activity }: ToolActivityBadgeProps) {
   const Icon = TOOL_ICONS[activity.toolName] || IconTool;
   const color = TOOL_COLORS[activity.toolName] || 'gray';
+  const detail = formatActivityDetail(activity);
 
   return (
-    <Badge
-      size="xs"
-      variant="light"
-      color={color}
-      leftSection={<Icon size={10} />}
-      style={{ fontFamily: 'monospace', opacity: 0.6 }}
-    >
-      {activity.displayName}
-    </Badge>
+    <Group gap={6} my={2} wrap="nowrap">
+      <ThemeIcon size={18} variant="light" color={color} radius="sm">
+        <Icon size={10} />
+      </ThemeIcon>
+      <Text size="xs" c={`${color}.4`} fw={500} style={{ flexShrink: 0 }}>
+        {activity.displayName}
+      </Text>
+      {detail && (
+        <Text size="xs" c="dimmed" lineClamp={1} style={{ fontFamily: 'monospace' }}>
+          {detail}
+        </Text>
+      )}
+      <Badge size="xs" variant="light" color="teal" style={{ flexShrink: 0 }}>
+        Allowed
+      </Badge>
+    </Group>
   );
 }

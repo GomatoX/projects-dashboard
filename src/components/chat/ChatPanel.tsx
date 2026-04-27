@@ -25,7 +25,8 @@ import {
   IconSparkles,
   IconCoins,
 } from '@tabler/icons-react';
-import { notifications } from '@mantine/notifications';
+import { notify } from '@/lib/notify';
+import { playSound } from '@/lib/audio';
 import { ChatMessage, type ChatMsg } from './ChatMessage';
 import { ChatInput } from './ChatInput';
 import { ToolApprovalCard, ToolActivityBadge, type PermissionRequest, type ToolActivity } from './ToolApprovalCard';
@@ -48,10 +49,13 @@ interface ChatPanelProps {
 }
 
 const MODEL_OPTIONS = [
-  { value: 'claude-opus-4-7', label: '⚡ Opus 4.7' },
-  { value: 'claude-sonnet-4-6', label: '✦ Sonnet 4.6' },
-  { value: 'claude-haiku-4-5', label: '⚙ Haiku 4.5' },
+  { value: 'claude-opus-4-7', label: 'Opus 4.7' },
+  { value: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
+  { value: 'claude-haiku-4-5', label: 'Haiku 4.5' },
 ];
+
+const LAST_MODEL_STORAGE_KEY = 'chat:lastSelectedModel';
+const DEFAULT_MODEL = 'claude-sonnet-4-6';
 
 export function ChatPanel({ projectId, deviceId }: ChatPanelProps) {
   const [chatList, setChatList] = useState<Chat[]>([]);
@@ -63,8 +67,17 @@ export function ChatPanel({ projectId, deviceId }: ChatPanelProps) {
   const [permissions, setPermissions] = useState<PermissionRequest[]>([]);
   const [toolActivities, setToolActivities] = useState<ToolActivity[]>([]);
   const [respondingTo, setRespondingTo] = useState<string | null>(null);
-  const [selectedModel, setSelectedModel] = useState('claude-sonnet-4-20250514');
+  const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Load last selected model from localStorage on mount
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const saved = window.localStorage.getItem(LAST_MODEL_STORAGE_KEY);
+    if (saved && MODEL_OPTIONS.some((m) => m.value === saved)) {
+      setSelectedModel(saved);
+    }
+  }, []);
 
   // Fetch chat list
   const fetchChats = useCallback(async () => {
@@ -114,7 +127,7 @@ export function ChatPanel({ projectId, deviceId }: ChatPanelProps) {
         behavior: 'smooth',
       });
     }
-  }, [messages, streamingContent]);
+  }, [messages, streamingContent, permissions.length, toolActivities.length]);
 
   // Create new chat
   const createChat = async () => {
@@ -129,13 +142,17 @@ export function ChatPanel({ projectId, deviceId }: ChatPanelProps) {
       setActiveChat(chat.id);
       setMessages([]);
     } catch {
-      notifications.show({ title: 'Error', message: 'Failed to create chat', color: 'red' });
+      notify({ title: 'Error', message: 'Failed to create chat', color: 'red' });
     }
   };
 
   // Switch chat
   const switchChat = async (chatId: string) => {
     setActiveChat(chatId);
+    const chat = chatList.find((c) => c.id === chatId);
+    if (chat?.model) {
+      setSelectedModel(chat.model);
+    }
     await fetchMessages(chatId);
   };
 
@@ -157,7 +174,7 @@ export function ChatPanel({ projectId, deviceId }: ChatPanelProps) {
         }
       }
     } catch {
-      notifications.show({ title: 'Error', message: 'Failed to delete chat', color: 'red' });
+      notify({ title: 'Error', message: 'Failed to delete chat', color: 'red' });
     }
   };
 
@@ -230,10 +247,18 @@ export function ChatPanel({ projectId, deviceId }: ChatPanelProps) {
               setMessages((prev) => [...prev, assistantMsg]);
               setStreamingContent('');
 
+              // Play a chime once the assistant has finished — long agent
+              // turns are the single best place to surface "your turn again".
+              playSound('taskComplete');
+
               // Refresh chat list to update title/cost
               await fetchChats();
             } else if (event.type === 'permission_request') {
               // Agent needs approval for a tool
+              console.log('[Chat] Permission request received:', event.toolName, event.toolUseId);
+              // Nudge the user — a permission request blocks the agent until
+              // they click, so it should never go unnoticed.
+              playSound('notification');
               setPermissions((prev) => [
                 ...prev,
                 {
@@ -256,10 +281,11 @@ export function ChatPanel({ projectId, deviceId }: ChatPanelProps) {
                   toolName: event.tool.toolName,
                   displayName: event.tool.displayName,
                   status: event.tool.status,
+                  input: event.tool.input,
                 } as ToolActivity,
               ]);
             } else if (event.type === 'error') {
-              notifications.show({
+              notify({
                 title: 'AI Error',
                 message: event.message,
                 color: 'red',
@@ -271,7 +297,7 @@ export function ChatPanel({ projectId, deviceId }: ChatPanelProps) {
         }
       }
     } catch (error) {
-      notifications.show({
+      notify({
         title: 'Error',
         message: 'Failed to get AI response',
         color: 'red',
@@ -305,7 +331,7 @@ export function ChatPanel({ projectId, deviceId }: ChatPanelProps) {
         ),
       );
     } catch {
-      notifications.show({
+      notify({
         title: 'Error',
         message: 'Failed to send permission decision',
         color: 'red',
@@ -334,7 +360,7 @@ export function ChatPanel({ projectId, deviceId }: ChatPanelProps) {
         ),
       );
     } catch {
-      notifications.show({
+      notify({
         title: 'Error',
         message: 'Failed to send permission decision',
         color: 'red',
@@ -390,25 +416,6 @@ export function ChatPanel({ projectId, deviceId }: ChatPanelProps) {
               </ActionIcon>
             </Tooltip>
           </Group>
-
-          <Box px="xs" py={6} style={{ borderBottom: '1px solid var(--mantine-color-dark-6)' }}>
-            <Select
-              size="xs"
-              value={selectedModel}
-              onChange={(val) => val && setSelectedModel(val)}
-              data={MODEL_OPTIONS}
-              allowDeselect={false}
-              styles={{
-                input: {
-                  backgroundColor: 'var(--mantine-color-dark-7)',
-                  borderColor: 'var(--mantine-color-dark-5)',
-                  fontSize: '11px',
-                  minHeight: '28px',
-                  height: '28px',
-                },
-              }}
-            />
-          </Box>
         </Stack>
 
         <ScrollArea style={{ flex: 1 }} type="auto">
@@ -419,7 +426,7 @@ export function ChatPanel({ projectId, deviceId }: ChatPanelProps) {
               </Text>
             ) : (
               chatList.map((chat) => (
-                <UnstyledButton
+                <Box
                   key={chat.id}
                   w="100%"
                   py={8}
@@ -436,6 +443,7 @@ export function ChatPanel({ projectId, deviceId }: ChatPanelProps) {
                         ? '2px solid var(--mantine-color-brand-5)'
                         : '2px solid transparent',
                     transition: 'background-color 0.1s',
+                    cursor: 'pointer',
                   }}
                 >
                   <Group gap={6} wrap="nowrap">
@@ -474,7 +482,7 @@ export function ChatPanel({ projectId, deviceId }: ChatPanelProps) {
                       ${chat.estimatedCost.toFixed(4)}
                     </Text>
                   )}
-                </UnstyledButton>
+                </Box>
               ))
             )}
           </Stack>
@@ -508,9 +516,39 @@ export function ChatPanel({ projectId, deviceId }: ChatPanelProps) {
               </Text>
             </Group>
             <Group gap="xs">
-              <Badge size="xs" variant="outline" color="dark.3">
-                {activeChatData.model.split('-').slice(0, 2).join(' ')}
-              </Badge>
+              <Select
+                size="xs"
+                value={selectedModel}
+                onChange={(val) => {
+                  if (!val) return;
+                  setSelectedModel(val);
+                  if (typeof window !== 'undefined') {
+                    window.localStorage.setItem(LAST_MODEL_STORAGE_KEY, val);
+                  }
+                  if (activeChat) {
+                    fetch(`/api/projects/${projectId}/chat/${activeChat}`, {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ model: val }),
+                    });
+                    setChatList((prev) =>
+                      prev.map((c) => (c.id === activeChat ? { ...c, model: val } : c)),
+                    );
+                  }
+                }}
+                data={MODEL_OPTIONS}
+                allowDeselect={false}
+                styles={{
+                  input: {
+                    backgroundColor: 'var(--mantine-color-dark-7)',
+                    borderColor: 'var(--mantine-color-dark-5)',
+                    fontSize: '11px',
+                    minHeight: '28px',
+                    height: '28px',
+                    width: '140px',
+                  },
+                }}
+              />
               {activeChatData.estimatedCost > 0 && (
                 <Badge
                   size="xs"
@@ -564,28 +602,46 @@ export function ChatPanel({ projectId, deviceId }: ChatPanelProps) {
                 {messages.map((msg) => (
                   <ChatMessage key={msg.id} message={msg} />
                 ))}
-                {streaming && streamingContent && (
-                  <ChatMessage
-                    message={{
-                      id: 'streaming',
-                      chatId: activeChat!,
-                      role: 'assistant',
-                      content: streamingContent,
-                      toolUses: '[]',
-                      proposedChanges: '[]',
-                      attachments: '[]',
-                      timestamp: new Date().toISOString(),
-                    }}
-                    isStreaming
-                  />
-                )}
-                {/* Tool Activity Badges (auto-allowed) */}
-                {toolActivities.length > 0 && (
-                  <Group gap={4} px="xs" py={4} wrap="wrap">
-                    {toolActivities.map((ta) => (
-                      <ToolActivityBadge key={ta.id} activity={ta} />
-                    ))}
-                  </Group>
+
+                {/* Live streaming section */}
+                {streaming && (
+                  <>
+                    {/* Tool Activity (inline during streaming) */}
+                    {toolActivities.length > 0 && (
+                      <Box px="md" py={4}>
+                        {toolActivities.map((ta) => (
+                          <ToolActivityBadge key={ta.id} activity={ta} />
+                        ))}
+                      </Box>
+                    )}
+
+                    {streamingContent ? (
+                      <ChatMessage
+                        message={{
+                          id: 'streaming',
+                          chatId: activeChat!,
+                          role: 'assistant',
+                          content: streamingContent,
+                          toolUses: '[]',
+                          proposedChanges: '[]',
+                          attachments: '[]',
+                          timestamp: new Date().toISOString(),
+                        }}
+                        isStreaming
+                      />
+                    ) : (
+                      <Box px="md" py="sm">
+                        <Group gap="xs">
+                          <Loader size={14} color="brand" type="dots" />
+                          <Text size="xs" c="dimmed" fs="italic">
+                            {toolActivities.length > 0
+                              ? 'Working...'
+                              : 'Thinking...'}
+                          </Text>
+                        </Group>
+                      </Box>
+                    )}
+                  </>
                 )}
                 {/* Permission Requests */}
                 {permissions.length > 0 && (

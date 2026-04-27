@@ -15,7 +15,7 @@ import {
   Center,
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
-import { notifications } from '@mantine/notifications';
+import { notify } from '@/lib/notify';
 import { IconLock, IconMail, IconUserPlus, IconLogin } from '@tabler/icons-react';
 import { authClient } from '@/lib/auth-client';
 import classes from './login.module.css';
@@ -51,7 +51,7 @@ function LoginForm() {
           name: values.name,
         });
         if (error) {
-          notifications.show({
+          notify({
             title: 'Sign up failed',
             message: error.message || 'Something went wrong',
             color: 'red',
@@ -64,7 +64,7 @@ function LoginForm() {
           password: values.password,
         });
         if (error) {
-          notifications.show({
+          notify({
             title: 'Sign in failed',
             message: error.message || 'Invalid credentials',
             color: 'red',
@@ -74,7 +74,7 @@ function LoginForm() {
       }
       router.push(callbackUrl);
     } catch {
-      notifications.show({
+      notify({
         title: 'Error',
         message: 'An unexpected error occurred',
         color: 'red',

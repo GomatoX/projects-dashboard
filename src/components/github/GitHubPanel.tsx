@@ -20,7 +20,7 @@ import {
   IconExternalLink,
   IconUnlink,
 } from '@tabler/icons-react';
-import { notifications } from '@mantine/notifications';
+import { notify } from '@/lib/notify';
 import { ConnectGitHub } from './ConnectGitHub';
 import { PRCard } from './PRCard';
 import { PRDetailDrawer } from './PRDetailDrawer';
@@ -51,7 +51,7 @@ export function GitHubPanel({ projectId, github: initialGithub }: GitHubPanelPro
         setPrs(data.prs);
       }
     } catch {
-      notifications.show({
+      notify({
         title: 'Error',
         message: 'Failed to fetch PRs',
         color: 'red',
@@ -72,13 +72,13 @@ export function GitHubPanel({ projectId, github: initialGithub }: GitHubPanelPro
       });
       setGithub(null);
       setPrs([]);
-      notifications.show({
+      notify({
         title: 'Disconnected',
         message: 'GitHub repository unlinked',
         color: 'yellow',
       });
     } catch {
-      notifications.show({
+      notify({
         title: 'Error',
         message: 'Failed to disconnect',
         color: 'red',

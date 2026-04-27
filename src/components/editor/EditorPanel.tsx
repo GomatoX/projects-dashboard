@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import { Box, Group, Center, Text, Stack, Loader, Badge, ActionIcon, Tooltip } from '@mantine/core';
-import { notifications } from '@mantine/notifications';
+import { notify } from '@/lib/notify';
 import { IconAlertTriangle, IconDeviceFloppy } from '@tabler/icons-react';
 import { FileTree } from './FileTree';
 import { EditorTabs, type EditorTab } from './EditorTabs';
@@ -38,7 +38,7 @@ export function EditorPanel({ projectId, projectPath, deviceId }: EditorPanelPro
         });
 
         if (!res.ok) {
-          notifications.show({
+          notify({
             title: 'Error',
             message: 'Failed to load file',
             color: 'red',
@@ -61,14 +61,14 @@ export function EditorPanel({ projectId, projectPath, deviceId }: EditorPanelPro
           setTabs((prev) => [...prev, newTab]);
           setActiveTab(path);
         } else if (data.type === 'COMMAND_ERROR') {
-          notifications.show({
+          notify({
             title: 'Error',
             message: data.message || 'Failed to read file',
             color: 'red',
           });
         }
       } catch {
-        notifications.show({
+        notify({
           title: 'Error',
           message: 'Failed to load file',
           color: 'red',
@@ -137,21 +137,21 @@ export function EditorPanel({ projectId, projectPath, deviceId }: EditorPanelPro
                 : t,
             ),
           );
-          notifications.show({
+          notify({
             title: 'Saved',
             message: tab.name,
             color: 'teal',
             autoClose: 1500,
           });
         } else {
-          notifications.show({
+          notify({
             title: 'Save failed',
             message: data.message || 'Could not write file',
             color: 'red',
           });
         }
       } catch {
-        notifications.show({
+        notify({
           title: 'Error',
           message: 'Failed to save file',
           color: 'red',

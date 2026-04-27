@@ -22,3 +22,24 @@ export async function DELETE(
     return NextResponse.json({ error: 'Failed to delete chat' }, { status: 500 });
   }
 }
+
+// PATCH /api/projects/[id]/chat/[chatId] — update chat fields (e.g. model)
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string; chatId: string }> },
+) {
+  const { chatId } = await params;
+  const body = await request.json();
+
+  try {
+    await db
+      .update(chats)
+      .set({ model: body.model, updatedAt: new Date() })
+      .where(eq(chats.id, chatId));
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error('Failed to update chat:', error);
+    return NextResponse.json({ error: 'Failed to update chat' }, { status: 500 });
+  }
+}

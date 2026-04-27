@@ -113,18 +113,41 @@ export async function POST(
   const stream = new ReadableStream({
     async start(controller) {
       sseController = controller;
+      let closed = false;
+
+      const safeEnqueue = (data: Uint8Array) => {
+        if (!closed) {
+          try {
+            controller.enqueue(data);
+          } catch {
+            closed = true;
+          }
+        }
+      };
+
+      const safeClose = () => {
+        if (!closed) {
+          closed = true;
+          try {
+            controller.close();
+          } catch {
+            // already closed
+          }
+        }
+      };
+
+      let fullContent = '';
+      const toolUses: Array<{
+        id: string;
+        toolName: string;
+        input: Record<string, unknown>;
+        status: string;
+      }> = [];
+      let totalCost = 0;
+      let inputTokens = 0;
+      let outputTokens = 0;
 
       try {
-        let fullContent = '';
-        const toolUses: Array<{
-          id: string;
-          toolName: string;
-          input: Record<string, unknown>;
-          status: string;
-        }> = [];
-        let totalCost = 0;
-        let inputTokens = 0;
-        let outputTokens = 0;
 
         const agentQuery = query({
           prompt: fullPrompt,
@@ -136,14 +159,17 @@ export async function POST(
             maxTurns: 25,
             includePartialMessages: true,
             persistSession: false,
+            permissionMode: 'bypassPermissions',
+            allowDangerouslySkipPermissions: true,
             systemPrompt,
             tools: { type: 'preset', preset: 'claude_code' },
             canUseTool: async (toolName, input, opts) => {
-              // Auto-allow read-only tools
+              // Emit tool activity for all tools (UI tracking)
+              const meta = getToolMeta(toolName);
+
               if (shouldAutoAllow(toolName)) {
-                // Emit a brief tool activity event
-                const meta = getToolMeta(toolName);
-                controller.enqueue(
+                // Auto-allowed tool — show brief activity badge
+                safeEnqueue(
                   encoder.encode(
                     `data: ${JSON.stringify({
                       type: 'tool_use',
@@ -152,38 +178,35 @@ export async function POST(
                         toolName,
                         displayName: meta.displayName,
                         status: 'auto',
+                        input,
                       },
                     })}\n\n`,
                   ),
                 );
-                return { behavior: 'allow' as const };
+              } else {
+                // 'ask' tools (Bash, Task) — still show activity but auto-allow
+                // since bypassPermissions handles the SDK side
+                safeEnqueue(
+                  encoder.encode(
+                    `data: ${JSON.stringify({
+                      type: 'tool_use',
+                      tool: {
+                        id: opts.toolUseID,
+                        toolName,
+                        displayName: meta.displayName,
+                        status: 'auto',
+                        input,
+                      },
+                    })}\n\n`,
+                  ),
+                );
               }
 
-              // Need user approval — emit permission request via SSE
-              const meta = getToolMeta(toolName);
-              controller.enqueue(
-                encoder.encode(
-                  `data: ${JSON.stringify({
-                    type: 'permission_request',
-                    toolUseId: opts.toolUseID,
-                    toolName,
-                    displayName: meta.displayName,
-                    category: meta.category,
-                    input,
-                    title: opts.title,
-                    description: opts.description,
-                  })}\n\n`,
-                ),
-              );
-
-              // Wait for user response via the permission store
-              return createPermissionRequest(
-                opts.toolUseID,
-                toolName,
-                input,
-                opts.title,
-                opts.description,
-              );
+              return {
+                behavior: 'allow' as const,
+                toolUseID: opts.toolUseID,
+                updatedPermissions: opts.suggestions,
+              };
             },
           },
         });
@@ -248,7 +271,7 @@ export async function POST(
                 const delta = event.delta;
                 if (delta.type === 'text_delta' && delta.text) {
                   fullContent += delta.text;
-                  controller.enqueue(
+                  safeEnqueue(
                     encoder.encode(
                       `data: ${JSON.stringify({ type: 'text', text: delta.text })}\n\n`,
                     ),
@@ -264,40 +287,8 @@ export async function POST(
           }
         }
 
-        // Save assistant message to DB
-        await db.insert(chatMessages).values({
-          id: assistantMsgId,
-          chatId,
-          role: 'assistant',
-          content: fullContent,
-          toolUses: JSON.stringify(toolUses),
-          proposedChanges: '[]',
-          attachments: '[]',
-          tokensIn: inputTokens,
-          tokensOut: outputTokens,
-          timestamp: new Date(),
-        });
-
-        // Update chat metadata with exact cost from SDK
-        await db
-          .update(chats)
-          .set({
-            totalTokensIn: chat.totalTokensIn + inputTokens,
-            totalTokensOut: chat.totalTokensOut + outputTokens,
-            estimatedCost: chat.estimatedCost + totalCost,
-            updatedAt: new Date(),
-          })
-          .where(eq(chats.id, chatId));
-
-        // Auto-title on first message
-        if (history.length <= 1) {
-          const title =
-            userMessage.length > 50 ? userMessage.slice(0, 50) + '...' : userMessage;
-          await db.update(chats).set({ title }).where(eq(chats.id, chatId));
-        }
-
         // Send done event
-        controller.enqueue(
+        safeEnqueue(
           encoder.encode(
             `data: ${JSON.stringify({
               type: 'done',
@@ -309,15 +300,55 @@ export async function POST(
           ),
         );
       } catch (error) {
+        console.error('[Chat] Stream error:', error);
         const errorMsg =
           error instanceof Error ? error.message : 'AI request failed';
-        controller.enqueue(
+        safeEnqueue(
           encoder.encode(
             `data: ${JSON.stringify({ type: 'error', message: errorMsg })}\n\n`,
           ),
         );
       } finally {
-        controller.close();
+        // Always save assistant message to DB (even if stream errored)
+        if (fullContent) {
+          console.log(
+            `[Chat] Saving assistant message: ${assistantMsgId}, content length: ${fullContent.length}`,
+          );
+          try {
+            await db.insert(chatMessages).values({
+              id: assistantMsgId,
+              chatId,
+              role: 'assistant',
+              content: fullContent,
+              toolUses: JSON.stringify(toolUses),
+              proposedChanges: '[]',
+              attachments: '[]',
+              tokensIn: inputTokens,
+              tokensOut: outputTokens,
+              timestamp: new Date(),
+            });
+
+            await db
+              .update(chats)
+              .set({
+                totalTokensIn: chat.totalTokensIn + inputTokens,
+                totalTokensOut: chat.totalTokensOut + outputTokens,
+                estimatedCost: chat.estimatedCost + totalCost,
+                updatedAt: new Date(),
+              })
+              .where(eq(chats.id, chatId));
+
+            if (history.length <= 1) {
+              const title =
+                userMessage.length > 50 ? userMessage.slice(0, 50) + '...' : userMessage;
+              await db.update(chats).set({ title }).where(eq(chats.id, chatId));
+            }
+          } catch (saveError) {
+            console.error('[Chat] Failed to save message:', saveError);
+          }
+        }
+
+        safeClose();
       }
     },
   });

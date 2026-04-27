@@ -31,7 +31,7 @@ import {
   IconChevronDown,
   IconChevronUp,
 } from '@tabler/icons-react';
-import { notifications } from '@mantine/notifications';
+import { notify } from '@/lib/notify';
 import type { PRDetail, PRFile } from '@/lib/github';
 
 interface PRDetailDrawerProps {
@@ -76,7 +76,7 @@ export function PRDetailDrawer({
       const data = await res.json();
       setDetail(data);
     } catch {
-      notifications.show({
+      notify({
         title: 'Error',
         message: 'Failed to load PR details',
         color: 'red',
@@ -106,7 +106,7 @@ export function PRDetailDrawer({
       const data = await res.json();
       if (data.summary) {
         setSummary(data.summary);
-        notifications.show({
+        notify({
           title: 'Summary generated',
           message: 'AI review is ready',
           color: 'teal',
@@ -114,7 +114,7 @@ export function PRDetailDrawer({
         });
       }
     } catch {
-      notifications.show({
+      notify({
         title: 'Error',
         message: 'Failed to generate summary',
         color: 'red',

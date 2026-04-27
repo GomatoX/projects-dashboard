@@ -16,7 +16,7 @@ import {
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { modals } from '@mantine/modals';
-import { notifications } from '@mantine/notifications';
+import { notify } from '@/lib/notify';
 import { IconPlus, IconDeviceDesktop, IconRefresh, IconBook } from '@tabler/icons-react';
 import { DeviceCard } from '@/components/devices/DeviceCard';
 import { AddDeviceModal } from '@/components/devices/AddDeviceModal';
@@ -71,7 +71,7 @@ export default function DevicesPage() {
 
       setDevices(enriched);
     } catch {
-      notifications.show({
+      notify({
         title: 'Error',
         message: 'Failed to fetch devices',
         color: 'red',
@@ -109,14 +109,14 @@ export default function DevicesPage() {
       onConfirm: async () => {
         try {
           await fetch(`/api/devices/${id}`, { method: 'DELETE' });
-          notifications.show({
+          notify({
             title: 'Removed',
             message: `${device?.name} has been removed`,
             color: 'orange',
           });
           fetchDevices();
         } catch {
-          notifications.show({
+          notify({
             title: 'Error',
             message: 'Failed to remove device',
             color: 'red',
@@ -127,7 +127,7 @@ export default function DevicesPage() {
   };
 
   const handleProjectsDiscovered = (deviceId: string, projects: DiscoveredProject[]) => {
-    notifications.show({
+    notify({
       title: 'Projects Discovered',
       message: `Found ${projects.length} project${projects.length !== 1 ? 's' : ''} on the connected device`,
       color: 'teal',

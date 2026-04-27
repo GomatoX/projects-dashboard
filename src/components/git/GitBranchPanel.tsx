@@ -16,7 +16,7 @@ import {
   ScrollArea,
 } from '@mantine/core';
 import { modals } from '@mantine/modals';
-import { notifications } from '@mantine/notifications';
+import { notify } from '@/lib/notify';
 import {
   IconRefresh,
   IconGitBranch,
@@ -60,11 +60,11 @@ export function GitBranchPanel({
       }) as { success?: boolean; message?: string };
 
       if (result.success) {
-        notifications.show({ title: 'Branch created', message: result.message as string, color: 'teal' });
+        notify({ title: 'Branch created', message: result.message as string, color: 'teal' });
         setNewBranchName('');
         await onRefresh();
       } else {
-        notifications.show({ title: 'Error', message: (result.message as string) || 'Failed', color: 'red' });
+        notify({ title: 'Error', message: (result.message as string) || 'Failed', color: 'red' });
       }
     } finally {
       setCreating(false);
@@ -78,10 +78,10 @@ export function GitBranchPanel({
       const result = await gitCommand('GIT_CHECKOUT', { branch }) as { success?: boolean; message?: string };
 
       if (result.success) {
-        notifications.show({ title: 'Switched', message: result.message as string, color: 'teal', autoClose: 1500 });
+        notify({ title: 'Switched', message: result.message as string, color: 'teal', autoClose: 1500 });
         await onRefresh();
       } else {
-        notifications.show({ title: 'Error', message: (result.message as string) || 'Checkout failed', color: 'red' });
+        notify({ title: 'Error', message: (result.message as string) || 'Checkout failed', color: 'red' });
       }
     } finally {
       setSwitching(null);
@@ -101,10 +101,10 @@ export function GitBranchPanel({
       onConfirm: async () => {
         const result = await gitCommand('GIT_DELETE_BRANCH', { name, remote: false }) as { success?: boolean; message?: string };
         if (result.success) {
-          notifications.show({ title: 'Deleted', message: `Branch ${name} deleted`, color: 'teal' });
+          notify({ title: 'Deleted', message: `Branch ${name} deleted`, color: 'teal' });
           await onRefresh();
         } else {
-          notifications.show({ title: 'Error', message: (result.message as string) || 'Delete failed', color: 'red' });
+          notify({ title: 'Error', message: (result.message as string) || 'Delete failed', color: 'red' });
         }
       },
     });
@@ -112,7 +112,7 @@ export function GitBranchPanel({
 
   const handleFetch = async () => {
     const result = await gitCommand('GIT_FETCH') as { success?: boolean; message?: string };
-    notifications.show({
+    notify({
       title: result.success ? 'Fetched' : 'Fetch Failed',
       message: result.message as string,
       color: result.success ? 'teal' : 'red',

@@ -7,6 +7,7 @@ import { useDisclosure, useMediaQuery } from '@mantine/hooks';
 import { SpotlightProvider } from '@/components/shell/SpotlightProvider';
 import { Header } from '@/components/shell/Header';
 import { Sidebar } from '@/components/shell/Sidebar';
+import { loadSoundSettings } from '@/lib/audio';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [opened, { toggle }] = useDisclosure();
@@ -20,6 +21,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         // SW registration failed — non-critical
       });
     }
+  }, []);
+
+  // Warm the sound-settings cache so `playSound()` honours user prefs from
+  // the very first notification (otherwise it falls back to defaults until
+  // the settings page is opened).
+  useEffect(() => {
+    loadSoundSettings().catch(() => {});
   }, []);
 
   return (

@@ -16,7 +16,7 @@ import {
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { modals } from '@mantine/modals';
-import { notifications } from '@mantine/notifications';
+import { notify } from '@/lib/notify';
 import { IconPlus, IconSearch, IconFolder } from '@tabler/icons-react';
 import { ProjectCard } from '@/components/projects/ProjectCard';
 import { ProjectForm } from '@/components/projects/ProjectForm';
@@ -51,7 +51,7 @@ export default function ProjectsPage() {
       const data = await res.json();
       setProjects(data);
     } catch {
-      notifications.show({
+      notify({
         title: 'Error',
         message: 'Failed to fetch projects',
         color: 'red',
@@ -93,7 +93,7 @@ export default function ProjectsPage() {
       });
       if (!res.ok) throw new Error('Failed to create project');
 
-      notifications.show({
+      notify({
         title: 'Project created',
         message: `${values.name} has been added`,
         color: 'teal',
@@ -101,7 +101,7 @@ export default function ProjectsPage() {
       closeCreate();
       fetchProjects();
     } catch {
-      notifications.show({
+      notify({
         title: 'Error',
         message: 'Failed to create project',
         color: 'red',
@@ -126,14 +126,14 @@ export default function ProjectsPage() {
       onConfirm: async () => {
         try {
           await fetch(`/api/projects/${id}`, { method: 'DELETE' });
-          notifications.show({
+          notify({
             title: 'Deleted',
             message: `${project?.name} has been removed`,
             color: 'orange',
           });
           fetchProjects();
         } catch {
-          notifications.show({
+          notify({
             title: 'Error',
             message: 'Failed to delete project',
             color: 'red',

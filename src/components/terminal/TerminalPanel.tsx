@@ -20,7 +20,7 @@ import {
   IconX,
   IconMaximize,
 } from '@tabler/icons-react';
-import { notifications } from '@mantine/notifications';
+import { notify } from '@/lib/notify';
 import dynamic from 'next/dynamic';
 
 // Lazy-load xterm to avoid SSR issues
@@ -77,7 +77,7 @@ export function TerminalPanel({ projectId, deviceId }: TerminalPanelProps) {
       setSessions((prev) => [...prev, session]);
       setActiveSession(data.sessionId);
     } catch (error) {
-      notifications.show({
+      notify({
         title: 'Error',
         message:
           error instanceof Error ? error.message : 'Failed to spawn terminal',
