@@ -83,8 +83,26 @@ export async function GET(
         );
       };
 
-      // Subscribe FIRST so any event that arrives during the snapshot
-      // flush is captured. We dedupe by seq inside `emit`.
+      // Heartbeat: emit an SSE comment every 15s on quiet tails. Real
+      // proxies (nginx, ALB, Cloudflare) silently drop idle connections
+      // around 60s; an EventSource client would auto-reconnect with
+      // Last-Event-ID anyway, but a comment frame is cheaper than a
+      // reconnect storm and is invisible to consumers. Cleared on every
+      // termination path (end-sentinel, ended-at-snapshot, abort).
+      let heartbeat: ReturnType<typeof setInterval> | null = null;
+      const stopHeartbeat = () => {
+        if (heartbeat) {
+          clearInterval(heartbeat);
+          heartbeat = null;
+        }
+      };
+
+      // Subscribe before flushing the snapshot so any event that arrives
+      // during the synchronous flush is captured. Note: events appended
+      // between getSnapshot() resolving and this subscribe() call are NOT
+      // caught by the listener — they're already in `initialSnapshot.events`
+      // (if persisted before the SELECT) or will need a client reconnect
+      // with ?since=lastSeq to recover (see appendEvent JSDoc).
       let unsubscribe: (() => void) | null = null;
       if (initialSnapshot.status === 'active') {
         unsubscribe = subscribe(chatId, (event) => {
@@ -97,6 +115,7 @@ export async function GET(
             );
             unsubscribe?.();
             unsubscribe = null;
+            stopHeartbeat();
             safeClose();
             return;
           }
@@ -120,10 +139,15 @@ export async function GET(
         return;
       }
 
+      heartbeat = setInterval(() => {
+        safeEnqueue(encoder.encode(`: keepalive\n\n`));
+      }, 15_000);
+
       // If the client disconnects mid-tail, just detach. Do NOT end the
       // journal — other readers may still be subscribed, and the agent
       // is producing real work that should land in DB regardless.
       request.signal.addEventListener('abort', () => {
+        stopHeartbeat();
         unsubscribe?.();
         unsubscribe = null;
         safeClose();
