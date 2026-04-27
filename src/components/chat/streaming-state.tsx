@@ -23,6 +23,7 @@
 import {
   createContext,
   useContext,
+  useMemo,
   useState,
   useCallback,
   type ReactNode,
@@ -41,17 +42,31 @@ export interface ChatStreamState {
   active: boolean;
 }
 
-const EMPTY_STATE: ChatStreamState = {
+// Frozen at the top level so consumers cannot accidentally reassign a
+// field on the shared default (e.g. `state.content = ''`). The arrays
+// are not deep-frozen because TypeScript's `readonly never[]` does not
+// satisfy `ToolActivity[]` without an `unknown` cast — and every mutator
+// goes through `update`, which spreads into a new object, so the arrays
+// are never mutated in practice.
+const EMPTY_STATE: ChatStreamState = Object.freeze({
   content: '',
   toolActivities: [],
   permissions: [],
   sessionId: null,
   lastEventSeq: 0,
   active: false,
-};
+});
 
 interface StreamingStateContextValue {
-  /** Returns the current state (or EMPTY_STATE) for a chat. */
+  /**
+   * Returns the current state (or EMPTY_STATE) for a chat.
+   *
+   * Note: this callback is recreated on every state change (`useCallback`
+   * deps include `byChat`), so it is NOT stable as a `useEffect` dep.
+   * Read it during render and pass the resulting slice instead, e.g.:
+   *   const slice = streaming.get(chatId);
+   *   useEffect(..., [slice.content, slice.permissions.length]);
+   */
   get: (chatId: string) => ChatStreamState;
   /** Begin a fresh turn — clears prior content/tools/perms and marks active. */
   begin: (chatId: string) => void;
@@ -178,18 +193,32 @@ export function StreamingStateProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  const value: StreamingStateContextValue = {
-    get,
-    begin,
-    appendText,
-    setSessionId,
-    addToolActivity,
-    addPermission,
-    updatePermission,
-    bumpSeq,
-    end,
-    clear,
-  };
+  const value = useMemo<StreamingStateContextValue>(
+    () => ({
+      get,
+      begin,
+      appendText,
+      setSessionId,
+      addToolActivity,
+      addPermission,
+      updatePermission,
+      bumpSeq,
+      end,
+      clear,
+    }),
+    [
+      get,
+      begin,
+      appendText,
+      setSessionId,
+      addToolActivity,
+      addPermission,
+      updatePermission,
+      bumpSeq,
+      end,
+      clear,
+    ],
+  );
 
   return (
     <StreamingStateContext.Provider value={value}>
