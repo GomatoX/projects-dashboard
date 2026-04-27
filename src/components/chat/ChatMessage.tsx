@@ -1,6 +1,7 @@
 'use client';
 
-import { Box, Group, Text, Badge, ThemeIcon, Anchor } from '@mantine/core';
+import { Box, Group, Text, Badge, ThemeIcon, Anchor, Modal, UnstyledButton } from '@mantine/core';
+import { useDisclosure } from '@mantine/hooks';
 import {
   IconUser,
   IconSparkles,
@@ -265,26 +266,86 @@ export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
 }
 
 // One thumbnail / chip per stored attachment. Images render as a clickable
-// 80x80 preview that opens the full file in a new tab; everything else
-// (PDF, txt, …) falls back to a labeled chip with the filename + size, since
-// inlining 30 MB of PDF in chat history is rarely what the user wants.
+// 80x80 preview that opens the full file in an in-app modal lightbox;
+// everything else (PDF, txt, …) falls back to a labeled chip with the
+// filename + size that opens in a new tab, since inlining 30 MB of PDF in
+// chat history is rarely what the user wants.
 function AttachmentTile({ attachment }: { attachment: StoredAttachment }) {
   const { url, type, name, size } = attachment;
+  const [opened, { open, close }] = useDisclosure(false);
   if (!url) return null;
   const isImage = (type ?? '').startsWith('image/');
   const displayName = name ?? attachment.filename ?? 'file';
 
   if (isImage) {
     return (
-      <Anchor href={url} target="_blank" rel="noopener noreferrer" underline="never">
-        <Box
+      <>
+        <UnstyledButton
+          onClick={open}
+          aria-label={`Open ${displayName}`}
           style={{
-            width: 80,
-            height: 80,
+            display: 'block',
             borderRadius: 'var(--mantine-radius-sm)',
-            border: '1px solid var(--mantine-color-dark-5)',
-            backgroundColor: 'var(--mantine-color-dark-7)',
-            overflow: 'hidden',
+          }}
+        >
+          <Box
+            style={{
+              width: 80,
+              height: 80,
+              borderRadius: 'var(--mantine-radius-sm)',
+              border: '1px solid var(--mantine-color-dark-5)',
+              backgroundColor: 'var(--mantine-color-dark-7)',
+              overflow: 'hidden',
+              cursor: 'zoom-in',
+            }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={url}
+              alt={displayName}
+              style={{
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover',
+                display: 'block',
+              }}
+            />
+          </Box>
+        </UnstyledButton>
+
+        <Modal
+          opened={opened}
+          onClose={close}
+          size="auto"
+          centered
+          withCloseButton
+          padding={0}
+          title={null}
+          overlayProps={{ backgroundOpacity: 0.75, blur: 4 }}
+          styles={{
+            content: {
+              backgroundColor: 'transparent',
+              boxShadow: 'none',
+            },
+            header: {
+              position: 'absolute',
+              top: 8,
+              right: 8,
+              padding: 0,
+              minHeight: 0,
+              background: 'transparent',
+              zIndex: 2,
+            },
+            body: {
+              padding: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            },
+            close: {
+              backgroundColor: 'rgba(0, 0, 0, 0.5)',
+              color: 'white',
+            },
           }}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -292,14 +353,18 @@ function AttachmentTile({ attachment }: { attachment: StoredAttachment }) {
             src={url}
             alt={displayName}
             style={{
-              width: '100%',
-              height: '100%',
-              objectFit: 'cover',
               display: 'block',
+              maxWidth: '90vw',
+              maxHeight: '90vh',
+              width: 'auto',
+              height: 'auto',
+              borderRadius: 'var(--mantine-radius-sm)',
+              cursor: 'zoom-out',
             }}
+            onClick={close}
           />
-        </Box>
-      </Anchor>
+        </Modal>
+      </>
     );
   }
 

@@ -70,6 +70,7 @@ const MODEL_OPTIONS = [
 ];
 
 const LAST_MODEL_STORAGE_KEY = 'chat:lastSelectedModel';
+const LAST_MODE_STORAGE_KEY = 'chat:lastExecutionMode';
 const DEFAULT_MODEL = 'claude-sonnet-4-6';
 const CHAT_LIST_POLL_MS = 3000;
 
@@ -274,10 +275,14 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
   // Create new chat
   const createChat = async () => {
     try {
+      const lastMode =
+        typeof window !== 'undefined'
+          ? (window.localStorage.getItem(LAST_MODE_STORAGE_KEY) as 'local' | 'remote') ?? 'local'
+          : 'local';
       const res = await fetch(`/api/projects/${projectId}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: selectedModel }),
+        body: JSON.stringify({ model: selectedModel, executionMode: lastMode }),
       });
       const chat = await res.json();
       setChatList((prev) => [chat, ...prev]);
@@ -704,7 +709,9 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
           <Group
             gap="xs"
             px="sm"
-            py={8}
+            h={45}
+            align="center"
+            wrap="nowrap"
             style={{ borderBottom: '1px solid var(--mantine-color-dark-6)' }}
           >
             <Text size="xs" fw={600} c="dimmed" tt="uppercase" style={{ flex: 1 }}>
@@ -829,14 +836,16 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
         {activeChatData && (
           <Group
             px="md"
-            py={8}
+            h={45}
+            align="center"
             justify="space-between"
+            wrap="nowrap"
             style={{
               borderBottom: '1px solid var(--mantine-color-dark-6)',
               backgroundColor: 'var(--mantine-color-dark-9)',
             }}
           >
-            <Group gap="sm">
+            <Group gap="sm" align="center" wrap="nowrap">
               {activeShowsLiveTurn ? (
                 <Tooltip label="Chat is processing…" withArrow>
                   <Box style={{ display: 'flex', alignItems: 'center' }}>
@@ -844,13 +853,13 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
                   </Box>
                 </Tooltip>
               ) : (
-                <IconSparkles size={16} style={{ color: 'var(--mantine-color-brand-5)' }} />
+                <IconSparkles size={16} style={{ color: 'var(--mantine-color-brand-5)', display: 'block' }} />
               )}
               <Text size="sm" fw={500}>
                 {activeChatData.title}
               </Text>
             </Group>
-            <Group gap="xs">
+            <Group gap="xs" align="center" wrap="nowrap">
               <Select
                 size="xs"
                 value={selectedModel}
@@ -878,8 +887,8 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
                     backgroundColor: 'var(--mantine-color-dark-7)',
                     borderColor: 'var(--mantine-color-dark-5)',
                     fontSize: '11px',
-                    minHeight: '28px',
-                    height: '28px',
+                    minHeight: '33px',
+                    height: '33px',
                     width: '140px',
                   },
                 }}
@@ -890,6 +899,9 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
                   value={activeChatData.executionMode ?? 'local'}
                   onChange={(val) => {
                     const mode = val as 'local' | 'remote';
+                    if (typeof window !== 'undefined') {
+                      window.localStorage.setItem(LAST_MODE_STORAGE_KEY, mode);
+                    }
                     if (activeChat) {
                       fetch(`/api/projects/${projectId}/chat/${activeChat}`, {
                         method: 'PATCH',
