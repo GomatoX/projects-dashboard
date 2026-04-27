@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
+import { useStreamingState } from './streaming-state';
 import {
   Box,
   Group,
@@ -105,17 +106,12 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
   // whenever any chat was streaming and leaked the typing indicator into
   // whichever chat happened to be active when an event arrived.
   const [streamingChats, setStreamingChats] = useState<Set<string>>(new Set());
-  const [streamingContents, setStreamingContents] = useState<Record<string, string>>({});
   // Server-reported in-flight turns (e.g. after a refresh, or another tab
   // started the stream). Populated by the chat list poll + the messages
   // fetch on chat switch.
   const [serverStreamingChats, setServerStreamingChats] = useState<Set<string>>(new Set());
-  const [permissionsByChat, setPermissionsByChat] = useState<Record<string, PermissionRequest[]>>({});
-  const [toolActivitiesByChat, setToolActivitiesByChat] = useState<Record<string, ToolActivity[]>>({});
   const [respondingTo, setRespondingTo] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL);
-  // Per-chat sessionId for remote cancel/permission round-trips.
-  const [sessionIdsByChat, setSessionIdsByChat] = useState<Record<string, string>>({});
   const scrollRef = useRef<HTMLDivElement>(null);
   // Tracks the chat the user is currently viewing without re-creating the
   // sendMessage closure on every switch. The streaming reader runs for the
@@ -125,6 +121,11 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
   useEffect(() => {
     activeChatRef.current = activeChat;
   }, [activeChat]);
+
+  const streaming = useStreamingState();
+  // Read the current streaming state slice for the active chat once per render.
+  // Passed into effect deps as individual scalar values (not the get() function).
+  const activeStreamState = activeChat ? streaming.get(activeChat) : null;
 
   // Load last selected model from localStorage on mount
   useEffect(() => {
@@ -207,54 +208,162 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
     return () => clearInterval(interval);
   }, [fetchChats]);
 
-  // Poll for completion when the server says a turn is streaming for the
-  // active chat but this browser is not the one driving it (typically after
-  // a refresh). When `isStreaming` flips back to false we pick up the new
-  // assistant message that the stream route just persisted.
+  // Handles SSE events from the /stream/subscribe endpoint (reattach path).
+  // Mirrors `handleEvent` in sendMessage, but writes exclusively through the
+  // streaming context (no local `accumulated` string — context.content is the
+  // accumulator). Stable as long as `streaming`, `fetchMessages`, and
+  // `fetchChats` are stable.
+  const handleSubscribedEvent = useCallback(
+    (chatId: string, event: Record<string, unknown>) => {
+      if (event.type === 'session_started') {
+        streaming.setSessionId(chatId, event.sessionId as string);
+        return;
+      }
+      if (event.type === 'text') {
+        // begin() is idempotent if already active; ensures we initialise
+        // empty content even if we joined mid-turn.
+        const cur = streaming.get(chatId);
+        if (!cur.active) streaming.begin(chatId);
+        streaming.appendText(chatId, event.text as string);
+        return;
+      }
+      if (event.type === 'tool_use') {
+        const tool = event.tool as Record<string, unknown>;
+        streaming.addToolActivity(chatId, {
+          id: tool.id as string,
+          toolName: tool.toolName as string,
+          displayName: tool.displayName as string,
+          status: tool.status as ToolActivity['status'],
+          input: tool.input as Record<string, unknown>,
+        });
+        return;
+      }
+      if (event.type === 'permission_request') {
+        streaming.addPermission(chatId, {
+          toolUseId: (event.toolUseId ?? event.requestId) as string,
+          toolName: event.toolName as string,
+          displayName: (event.displayName ?? event.toolName) as string,
+          category: (event.category ?? 'execute') as PermissionRequest['category'],
+          input: event.input as Record<string, unknown>,
+          title: (event.title ?? event.reason ?? `${event.toolName}`) as string,
+          description: event.description as string | undefined,
+          status: 'pending',
+        });
+        return;
+      }
+      if (event.type === 'done') {
+        if (activeChatRef.current === chatId) {
+          fetchMessages(chatId);
+        }
+        fetchChats();
+        playSound('taskComplete');
+        // The persisted assistant row is now in `msgs`; drop the live
+        // streaming state so we don't double-render.
+        streaming.clear(chatId);
+        return;
+      }
+      if (event.type === 'error') {
+        notify({
+          title: 'AI Error',
+          message: event.message as string,
+          color: 'red',
+        });
+        streaming.end(chatId);
+      }
+    },
+    [streaming, fetchMessages, fetchChats],
+  );
+
+  // ─── Reattach to a server-side live stream ──────────────────────────────
+  // When the server reports a chat is mid-turn but this browser is not
+  // driving the POST (page reload, project switch return, tab switch with
+  // a different active chat), open a SSE subscription to /stream/subscribe
+  // and pipe its events through handleSubscribedEvent. This restores live
+  // text deltas, tool activity badges, and pending permission requests
+  // with full fidelity.
+  // The old polling-based recovery (setInterval → fetchMessages) has been
+  // replaced by this subscribe-based approach.
   useEffect(() => {
     if (!activeChat) return;
     if (!serverStreamingChats.has(activeChat)) return;
-    // If we own the live SSE feed for this chat, the existing reader will
-    // append the assistant message itself — no need to poll.
-    if (streamingChats.has(activeChat)) return;
+    if (streamingChats.has(activeChat)) return; // we're already feeding events ourselves
 
     const chatId = activeChat;
+    const since = streaming.get(chatId).lastEventSeq;
+    const controller = new AbortController();
     let cancelled = false;
 
-    const tick = async () => {
+    (async () => {
       try {
         const res = await fetch(
-          `/api/projects/${projectId}/chat/${chatId}/messages`,
+          `/api/projects/${projectId}/chat/${chatId}/stream/subscribe?since=${since}`,
+          { signal: controller.signal },
         );
-        const data = await res.json();
-        if (cancelled) return;
-        // Drop the result if the user navigated away mid-poll — the next
-        // chat switch will fetch fresh state for the new chat.
-        if (activeChatRef.current !== chatId) return;
-        const msgs = Array.isArray(data) ? data : (data.messages ?? []);
-        const stillStreaming =
-          !Array.isArray(data) && Boolean(data.isStreaming);
-        setMessages(msgs);
-        setServerStreamingChats((prev) =>
-          stillStreaming ? withAdded(prev, chatId) : withRemoved(prev, chatId),
-        );
-        if (!stillStreaming) {
-          // Stream just finished — refresh the sidebar so the chat title /
-          // cost / token totals reflect the new turn.
-          fetchChats();
-          playSound('taskComplete');
+        if (!res.ok || !res.body) {
+          // 404 == no longer active — the polling effect will catch the new state
+          return;
         }
-      } catch {
-        // Transient network error — keep polling; effect cleanup handles teardown.
-      }
-    };
 
-    const interval = setInterval(tick, 2000);
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let pendingId: number | null = null;
+
+        const dispatch = (rawData: string) => {
+          let parsed: Record<string, unknown>;
+          try {
+            parsed = JSON.parse(rawData);
+          } catch {
+            return;
+          }
+          if (parsed.type === '__subscribe_end__') {
+            cancelled = true;
+            controller.abort();
+            return;
+          }
+          handleSubscribedEvent(chatId, parsed);
+          if (pendingId != null) {
+            streaming.bumpSeq(chatId, pendingId);
+            pendingId = null;
+          }
+        };
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (cancelled) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() ?? '';
+
+          for (const line of lines) {
+            if (line.startsWith('id: ')) {
+              const n = Number(line.slice(4));
+              if (!Number.isNaN(n)) pendingId = n;
+              continue;
+            }
+            if (line.startsWith('data: ')) {
+              dispatch(line.slice(6));
+              continue;
+            }
+            // blank line — frame boundary; nothing to do (dispatch already happened on data: line)
+          }
+        }
+      } catch (err) {
+        if ((err as Error).name !== 'AbortError') {
+          // eslint-disable-next-line no-console
+          console.warn('[ChatPanel] subscribe failed:', err);
+        }
+      }
+    })();
+
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      controller.abort();
     };
-  }, [serverStreamingChats, streamingChats, activeChat, projectId, fetchChats]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeChat, serverStreamingChats, streamingChats, projectId]);
 
   // Auto-scroll on new content
   useEffect(() => {
@@ -267,9 +376,9 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
   }, [
     messages,
     activeChat,
-    activeChat ? streamingContents[activeChat] : null,
-    activeChat ? permissionsByChat[activeChat]?.length : 0,
-    activeChat ? toolActivitiesByChat[activeChat]?.length : 0,
+    activeStreamState?.content,
+    activeStreamState?.permissions.length ?? 0,
+    activeStreamState?.toolActivities.length ?? 0,
   ]);
 
   // Create new chat
@@ -398,7 +507,7 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
       setMessages((prev) => [...prev, userMsg]);
     }
     setStreamingChats((prev) => withAdded(prev, chatId));
-    setStreamingContents((prev) => ({ ...prev, [chatId]: '' }));
+    streaming.begin(chatId);
 
     let accumulated = '';
 
@@ -407,13 +516,10 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
     const handleEvent = (event: Record<string, unknown>) => {
       if (event.type === 'session_started') {
         // Remote mode: capture the sessionId for cancel/permission
-        setSessionIdsByChat((prev) => ({
-          ...prev,
-          [chatId]: event.sessionId as string,
-        }));
+        streaming.setSessionId(chatId, event.sessionId as string);
       } else if (event.type === 'text') {
         accumulated += event.text as string;
-        setStreamingContents((prev) => ({ ...prev, [chatId]: accumulated }));
+        streaming.appendText(chatId, event.text as string);
       } else if (event.type === 'done') {
         const assistantMsg: ChatMsg = {
           id: event.messageId as string,
@@ -430,17 +536,7 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
         if (activeChatRef.current === chatId) {
           setMessages((prev) => [...prev, assistantMsg]);
         }
-        setStreamingContents((prev) => {
-          const next = { ...prev };
-          delete next[chatId];
-          return next;
-        });
-        // Clean up sessionId
-        setSessionIdsByChat((prev) => {
-          const next = { ...prev };
-          delete next[chatId];
-          return next;
-        });
+        streaming.clear(chatId);
         playSound('taskComplete');
         fetchChats();
       } else if (event.type === 'permission_request') {
@@ -456,10 +552,7 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
           description: event.description as string | undefined,
           status: 'pending',
         };
-        setPermissionsByChat((prev) => ({
-          ...prev,
-          [chatId]: [...(prev[chatId] ?? []), perm],
-        }));
+        streaming.addPermission(chatId, perm);
       } else if (event.type === 'tool_use') {
         const tool = event.tool as Record<string, unknown>;
         const activity: ToolActivity = {
@@ -469,10 +562,7 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
           status: tool.status as ToolActivity['status'],
           input: tool.input as Record<string, unknown>,
         };
-        setToolActivitiesByChat((prev) => ({
-          ...prev,
-          [chatId]: [...(prev[chatId] ?? []), activity],
-        }));
+        streaming.addToolActivity(chatId, activity);
       } else if (event.type === 'error') {
         const code = event.code as string | undefined;
         if (code === 'DEVICE_OFFLINE') {
@@ -560,19 +650,7 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
       });
     } finally {
       setStreamingChats((prev) => withRemoved(prev, chatId));
-      setStreamingContents((prev) => {
-        const next = { ...prev };
-        delete next[chatId];
-        return next;
-      });
-      // Drop any tool-activity badges that were tied to this turn — they're
-      // ephemeral UI signals, not persisted state.
-      setToolActivitiesByChat((prev) => {
-        if (!(chatId in prev)) return prev;
-        const next = { ...prev };
-        delete next[chatId];
-        return next;
-      });
+      streaming.end(chatId);
     }
   };
 
@@ -581,7 +659,7 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
     if (!activeChat) return;
     setRespondingTo(toolUseId);
     const chatId = activeChat;
-    const sessionId = sessionIdsByChat[chatId];
+    const sessionId = streaming.get(chatId).sessionId;
 
     try {
       if (sessionId) {
@@ -606,12 +684,7 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
         );
       }
 
-      setPermissionsByChat((prev) => ({
-        ...prev,
-        [chatId]: (prev[chatId] ?? []).map((p) =>
-          p.toolUseId === toolUseId ? { ...p, status: 'approved' } as PermissionRequest : p,
-        ),
-      }));
+      streaming.updatePermission(chatId, toolUseId, 'approved');
     } catch {
       notify({
         title: 'Error',
@@ -626,7 +699,7 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
   const denyPermission = async (toolUseId: string) => {
     if (!activeChat) return;
     const chatId = activeChat;
-    const sessionId = sessionIdsByChat[chatId];
+    const sessionId = streaming.get(chatId).sessionId;
 
     try {
       if (sessionId) {
@@ -649,12 +722,7 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
         );
       }
 
-      setPermissionsByChat((prev) => ({
-        ...prev,
-        [chatId]: (prev[chatId] ?? []).map((p) =>
-          p.toolUseId === toolUseId ? { ...p, status: 'denied' } as PermissionRequest : p,
-        ),
-      }));
+      streaming.updatePermission(chatId, toolUseId, 'denied');
     } catch {
       notify({
         title: 'Error',
@@ -674,9 +742,9 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
 
   const activeChatData = chatList.find((c) => c.id === activeChat);
   // Active-chat-scoped views — derived once so the JSX stays readable.
-  const activeStreamingContent = activeChat ? streamingContents[activeChat] : undefined;
-  const activeToolActivities = activeChat ? toolActivitiesByChat[activeChat] ?? [] : [];
-  const activePermissions = activeChat ? permissionsByChat[activeChat] ?? [] : [];
+  const activeStreamingContent = activeStreamState?.content || undefined;
+  const activeToolActivities = activeStreamState?.toolActivities ?? [];
+  const activePermissions = activeStreamState?.permissions ?? [];
   const activeIsLocallyStreaming = activeChat ? streamingChats.has(activeChat) : false;
   const activeIsServerStreaming = activeChat ? serverStreamingChats.has(activeChat) : false;
   const activeShowsLiveTurn = activeIsLocallyStreaming || activeIsServerStreaming;
