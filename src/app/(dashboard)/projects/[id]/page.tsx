@@ -281,7 +281,11 @@ export default function ProjectDetailPage() {
           />
         </Tabs.Panel>
 
-        <Tabs.Panel value="chat" style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+        <Tabs.Panel
+          value="chat"
+          keepMounted
+          style={{ flex: 1, minHeight: 0, overflow: 'auto' }}
+        >
           <ChatPanel
             projectId={project.id}
             deviceId={project.deviceId}
