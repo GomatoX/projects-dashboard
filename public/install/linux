@@ -59,6 +59,8 @@ cd "$INSTALL_DIR"
 pnpm install --frozen-lockfile 2>/dev/null || pnpm install
 
 # Config
+CLAUDE_BIN=$(command -v claude 2>/dev/null || true)
+
 cat > "$INSTALL_DIR/.env" <<EOF
 DASHBOARD_URL=$DASHBOARD_URL
 AGENT_TOKEN=$AGENT_TOKEN
@@ -66,6 +68,13 @@ AGENT_NAME=$(hostname)
 AGENT_PORT=3939
 PROJECT_PATHS=$HOME/projects
 EOF
+
+if [ -n "$CLAUDE_BIN" ]; then
+  echo "CLAUDE_PATH=$CLAUDE_BIN" >> "$INSTALL_DIR/.env"
+  echo "✓ Claude CLI: $CLAUDE_BIN"
+else
+  echo "⚠ Claude CLI not found in PATH — chat feature disabled until you install it"
+fi
 
 echo "✓ Configuration saved"
 

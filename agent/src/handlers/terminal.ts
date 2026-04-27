@@ -1,5 +1,13 @@
 import * as pty from 'node-pty';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import type { Socket } from 'socket.io-client';
+
+function expandHome(p: string): string {
+  if (p === '~') return homedir();
+  if (p.startsWith('~/')) return join(homedir(), p.slice(2));
+  return p;
+}
 
 // Active PTY sessions
 const sessions = new Map<string, pty.IPty>();
@@ -35,7 +43,7 @@ export function handleTerminalSpawn(
       name: 'xterm-256color',
       cols,
       rows,
-      cwd,
+      cwd: expandHome(cwd),
       env: {
         ...process.env,
         TERM: 'xterm-256color',

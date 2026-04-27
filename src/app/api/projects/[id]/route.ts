@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { projects } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
+import { expandTilde } from '@/lib/paths';
 
 export async function GET(
   _request: NextRequest,
@@ -35,7 +36,7 @@ export async function PATCH(
 
     const updateData: Record<string, unknown> = {};
     if (body.name !== undefined) updateData.name = body.name;
-    if (body.path !== undefined) updateData.path = body.path;
+    if (body.path !== undefined) updateData.path = expandTilde(body.path);
     if (body.type !== undefined) updateData.type = body.type;
     if (body.deviceId !== undefined) updateData.deviceId = body.deviceId;
     if (body.pm2Name !== undefined) updateData.pm2Name = body.pm2Name;

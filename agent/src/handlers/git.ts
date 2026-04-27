@@ -1,4 +1,6 @@
 import simpleGit from 'simple-git';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import type {
   AgentEvent,
   GitStatus,
@@ -7,8 +9,14 @@ import type {
   GitFileChange,
 } from '../../../src/lib/socket/types.js';
 
+function expandHome(p: string): string {
+  if (p === '~') return homedir();
+  if (p.startsWith('~/')) return join(homedir(), p.slice(2));
+  return p;
+}
+
 function git(cwd: string) {
-  return simpleGit({ baseDir: cwd, binary: 'git' });
+  return simpleGit({ baseDir: expandHome(cwd), binary: 'git' });
 }
 
 export async function handleGitStatus(

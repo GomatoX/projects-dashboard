@@ -4,6 +4,7 @@ import { projects, devices } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { getActiveProjectIds } from '@/lib/ai/active-streams';
+import { expandTilde } from '@/lib/paths';
 
 export async function GET() {
   try {
@@ -60,7 +61,7 @@ export async function POST(request: NextRequest) {
       id,
       name,
       deviceId: deviceId || null,
-      path,
+      path: expandTilde(path),
       type: type || 'node',
       pm2Name: pm2Name || null,
       github: github ? JSON.stringify(github) : null,

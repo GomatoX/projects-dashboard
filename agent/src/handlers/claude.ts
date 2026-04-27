@@ -1,6 +1,13 @@
-import { hostname } from 'node:os';
+import { hostname, homedir } from 'node:os';
+import { join } from 'node:path';
 import type { Socket } from 'socket.io-client';
 import { query } from '@anthropic-ai/claude-agent-sdk';
+
+function expandHome(p: string): string {
+  if (p === '~') return homedir();
+  if (p.startsWith('~/')) return join(homedir(), p.slice(2));
+  return p;
+}
 import type {
   SDKMessage,
   SDKAssistantMessage,
@@ -154,14 +161,16 @@ export async function runClaudeQuery(args: RunClaudeArgs): Promise<void> {
   let costUsd = 0;
 
   try {
+    const resolvedClaudePath =
+      claudePath ||
+      process.env.CLAUDE_PATH ||
+      `${process.env.HOME}/.local/bin/claude`;
+    const resolvedCwd = expandHome(projectPath);
     const agentQuery = query({
       prompt,
       options: {
-        pathToClaudeCodeExecutable:
-          claudePath ||
-          process.env.CLAUDE_PATH ||
-          `${process.env.HOME}/.local/bin/claude`,
-        cwd: projectPath,
+        pathToClaudeCodeExecutable: resolvedClaudePath,
+        cwd: resolvedCwd,
         ...(model ? { model } : {}),
         // Only forward maxTurns when the caller specified one. The SDK's
         // own default (no cap) is what we want for real-device work — a

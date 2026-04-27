@@ -1,6 +1,7 @@
 import { readFile, writeFile, readdir, stat } from 'node:fs/promises';
 import { join, relative, basename } from 'node:path';
 import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { AgentEvent, FileEntry, SearchResult } from '../../../src/lib/socket/types.js';
@@ -8,6 +9,12 @@ import type { AgentEvent, FileEntry, SearchResult } from '../../../src/lib/socke
 const execFileAsync = promisify(execFile);
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+
+function expandHome(p: string): string {
+  if (p === '~') return homedir();
+  if (p.startsWith('~/')) return join(homedir(), p.slice(2));
+  return p;
+}
 
 export async function handleReadFile(
   requestId: string,
@@ -57,6 +64,7 @@ export async function handleListFiles(
   recursive: boolean,
 ): Promise<AgentEvent> {
   try {
+    dirPath = expandHome(dirPath);
     const entries: FileEntry[] = [];
 
     async function scan(currentPath: string) {

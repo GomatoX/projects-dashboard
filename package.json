@@ -58,5 +58,11 @@
     "tsx": "^4.21.0",
     "typescript": "^5"
   },
-  "packageManager": "pnpm@10.11.0+sha512.6540583f41cc5f628eb3d9773ecee802f4f9ef9923cc45b69890fb47991d4b092964694ec3a4f738a420c918a333062c8b925d312f42e4f0c263eb603551f977"
+  "packageManager": "pnpm@10.11.0+sha512.6540583f41cc5f628eb3d9773ecee802f4f9ef9923cc45b69890fb47991d4b092964694ec3a4f738a420c918a333062c8b925d312f42e4f0c263eb603551f977",
+  "pnpm": {
+    "ignoredOptionalDependencies": [
+      "@anthropic-ai/claude-agent-sdk-linux-arm64-musl",
+      "@anthropic-ai/claude-agent-sdk-linux-x64-musl"
+    ]
+  }
 }
