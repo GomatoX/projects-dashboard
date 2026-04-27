@@ -20,6 +20,9 @@ app.prepare().then(async () => {
   const { eq, isNull } = await import('drizzle-orm');
   const agentManager = await import('./src/lib/socket/agent-manager.js');
   const { hashAgentToken, timingSafeEqualHex } = await import('./src/lib/auth/agent-token.js');
+  const { crashRecovery } = await import('./src/lib/ai/event-journal.js');
+
+  await crashRecovery();
 
   const httpServer = createServer(handler);
 
