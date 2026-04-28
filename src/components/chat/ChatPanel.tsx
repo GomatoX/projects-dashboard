@@ -44,6 +44,8 @@ interface UploadedAttachment {
   url: string;
 }
 import { ToolApprovalCard, ToolActivityBadge, type PermissionRequest, type ToolActivity } from './ToolApprovalCard';
+import { PreviewPanel } from './PreviewPanel';
+import { type PreviewState } from '@/lib/ai/preview-types';
 
 interface Chat {
   id: string;
@@ -131,6 +133,26 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
   const activeChatRef = useRef<string | null>(null);
   useEffect(() => {
     activeChatRef.current = activeChat;
+  }, [activeChat]);
+
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewExpanded, setPreviewExpanded] = useState(false);
+  const [previewRevision, setPreviewRevision] = useState(0);
+  const lastPreviewsRef = useRef<Map<string, PreviewState>>(new Map());
+
+  const currentPreview = activeChat
+    ? (lastPreviewsRef.current.get(activeChat) ?? null)
+    : null;
+
+  // Re-open the preview panel (collapsed) when switching to a chat that had a preview
+  useEffect(() => {
+    if (!activeChat) return;
+    const saved = lastPreviewsRef.current.get(activeChat);
+    if (saved) {
+      setPreviewOpen(true);
+    }
+    // Reset expanded state on every chat switch — expanding is an explicit user action
+    setPreviewExpanded(false);
   }, [activeChat]);
 
   const streaming = useStreamingState();
@@ -269,7 +291,23 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
         });
         return;
       }
+      if (event.type === 'preview') {
+        const ps: PreviewState = {
+          id: event.id as string,
+          contentType: event.contentType as PreviewState['contentType'],
+          content: event.content as string,
+          title: event.title as string | undefined,
+        };
+        streaming.setPreview(chatId, ps);
+        lastPreviewsRef.current.set(chatId, ps);
+        setPreviewOpen(true);
+        setPreviewRevision((r) => r + 1);
+        return;
+      }
       if (event.type === 'done') {
+        // Note: preview state is persisted to lastPreviewsRef in the 'preview'
+        // event handler above — the React state update from setPreview() may not
+        // have committed by the time 'done' fires, so reading it here is unreliable.
         streaming.end(chatId);
         if (activeChatRef.current === chatId) {
           // Refetch messages so the persisted assistant row replaces the
@@ -561,7 +599,21 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
         // more text). Inject a paragraph break so the live bubble shows
         // the same separation as the persisted row will after refetch.
         streaming.appendTurnBreak(chatId);
+      } else if (event.type === 'preview') {
+        const ps: PreviewState = {
+          id: event.id as string,
+          contentType: event.contentType as PreviewState['contentType'],
+          content: event.content as string,
+          title: event.title as string | undefined,
+        };
+        streaming.setPreview(chatId, ps);
+        lastPreviewsRef.current.set(chatId, ps);
+        setPreviewOpen(true);
+        setPreviewRevision((r) => r + 1);
       } else if (event.type === 'done') {
+        // Note: preview state is persisted to lastPreviewsRef in the 'preview'
+        // event handler above — React state may not have committed by the time
+        // 'done' fires, so reading streaming.get(chatId)?.preview here is unreliable.
         // The server now persists the assistant row BEFORE emitting
         // `done`, so refetching /messages here is race-free and gives us
         // the canonical row (with full tool_uses, tokens, etc.) — which
@@ -1310,6 +1362,19 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
           <ChatInput onSend={sendMessage} disabled={inputDisabled} />
         )}
       </Box>
+
+      {/* Preview panel — rendered when a preview event has been received.
+          key={previewRevision} ensures the panel refreshes when new preview
+          content arrives for the same chat (ref mutation alone won't re-render). */}
+      {previewOpen && currentPreview && (
+        <PreviewPanel
+          key={previewRevision}
+          preview={currentPreview}
+          isExpanded={previewExpanded}
+          onClose={() => setPreviewOpen(false)}
+          onToggleExpand={() => setPreviewExpanded((e) => !e)}
+        />
+      )}
     </Box>
   );
 }
