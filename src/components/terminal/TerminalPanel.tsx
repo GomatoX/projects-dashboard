@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import {
   Stack,
   Group,
@@ -12,14 +12,8 @@ import {
   Center,
   Loader,
   Box,
-  Tabs,
 } from '@mantine/core';
-import {
-  IconTerminal,
-  IconPlus,
-  IconX,
-  IconMaximize,
-} from '@tabler/icons-react';
+import { IconTerminal, IconPlus, IconX } from '@tabler/icons-react';
 import { notify } from '@/lib/notify';
 import dynamic from 'next/dynamic';
 
