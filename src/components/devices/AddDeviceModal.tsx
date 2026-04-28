@@ -273,6 +273,12 @@ pnpm install && pnpm dev`}</Code>
             </Text>
           </Group>
 
+          <Text size="xs" c="dimmed">
+            💡 Re-run the same command later to <b>update</b> the agent — it
+            preserves your <Code>.env</Code> and only refreshes the code. Or run{' '}
+            <Code>bash ~/.dev-dashboard-agent/update.sh</Code> on the device.
+          </Text>
+
           <Badge size="sm" variant="outline" color="yellow">
             Token expires in 10 minutes
           </Badge>

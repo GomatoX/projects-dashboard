@@ -37,6 +37,7 @@ const FILE_COMMANDS: Partial<Record<CommandType, FieldSpec>> = {
 const GIT_COMMANDS: Partial<Record<CommandType, FieldSpec>> = {
   GIT_STATUS: { clientFields: [], serverFields: ['projectPath'] },
   GIT_DIFF: { clientFields: ['staged'], serverFields: ['projectPath'] },
+  GIT_DIFF_FILE: { clientFields: ['path', 'mode'], serverFields: ['projectPath'] },
   GIT_BRANCHES: { clientFields: [], serverFields: ['projectPath'] },
   GIT_LOG: { clientFields: ['limit'], serverFields: ['projectPath'] },
   GIT_STAGE: { clientFields: ['files'], serverFields: ['projectPath'] },

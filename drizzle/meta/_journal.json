@@ -29,6 +29,13 @@
       "when": 1777291289072,
       "tag": "0003_add_claude_config",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1777306358925,
+      "tag": "0004_worthless_silvermane",
+      "breakpoints": true
     }
   ]
 }

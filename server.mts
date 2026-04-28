@@ -20,6 +20,11 @@ app.prepare().then(async () => {
   const { eq, isNull } = await import('drizzle-orm');
   const agentManager = await import('./src/lib/socket/agent-manager.js');
   const { hashAgentToken, timingSafeEqualHex } = await import('./src/lib/auth/agent-token.js');
+  const { crashRecovery } = await import('./src/lib/ai/event-journal.js');
+
+  // Seal any journals left 'active' by a previous Next.js process so
+  // /stream/subscribe sees a clean ended state. MUST run before listen().
+  await crashRecovery();
 
   const httpServer = createServer(handler);
 
@@ -28,6 +33,10 @@ app.prepare().then(async () => {
       origin: dev ? '*' : undefined,
     },
     path: '/api/ws',
+    // Don't kill upgrade requests for paths Socket.io doesn't own — Next.js
+    // HMR uses the same httpServer for /_next/webpack-hmr, and engine.io's
+    // 1s destroyUpgrade timer races the HMR handshake over slow links.
+    destroyUpgrade: false,
   });
 
   // ─── Socket.io Authentication Middleware ───────────────

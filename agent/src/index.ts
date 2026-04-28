@@ -19,6 +19,7 @@ import {
 import {
   handleGitStatus,
   handleGitDiff,
+  handleGitDiffFile,
   handleGitBranches,
   handleGitLog,
   handleGitStage,
@@ -47,7 +48,12 @@ import {
 } from './handlers/claude.js';
 import type { AgentCommand, AgentEvent } from '../../src/lib/socket/types.js';
 
-console.log('🔧 Dev Dashboard Agent v0.1.0');
+// Bumped on every code change that touches the agent ↔ dashboard contract,
+// so the agent log ("Dev Dashboard Agent v0.2.0") at startup is enough to
+// confirm the device is running the build that includes a given fix
+// (e.g. v0.2.0 = chat attachments are downloaded over HTTP instead of
+// surviving as `__ATTACHMENT_<index>__` placeholders).
+console.log('🔧 Dev Dashboard Agent v0.2.0 (attachments-over-http)');
 console.log('─'.repeat(40));
 
 const config = loadConfig();
@@ -161,6 +167,15 @@ const { socket } = createConnection(config, {
 
       case 'GIT_DIFF':
         response = await handleGitDiff(command.id, command.projectPath, command.staged);
+        break;
+
+      case 'GIT_DIFF_FILE':
+        response = await handleGitDiffFile(
+          command.id,
+          command.projectPath,
+          command.path,
+          command.mode,
+        );
         break;
 
       case 'GIT_BRANCHES':
@@ -295,6 +310,15 @@ const { socket } = createConnection(config, {
           maxTurns: command.maxTurns,
           claudePath: command.claudePath,
           permissions: command.permissions,
+          // Attachment plumbing — the dashboard URL / agent token are
+          // *not* on the command (they're agent-side config), so we
+          // bolt them on here. The handler downloads the bytes from
+          // the dashboard before invoking the SDK.
+          attachments: command.attachments,
+          chatId: command.chatId,
+          projectId: command.projectId,
+          dashboardUrl: config.dashboardUrl,
+          agentToken: config.agentToken,
         });
         return;
 
