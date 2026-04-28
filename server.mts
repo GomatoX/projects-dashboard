@@ -33,6 +33,10 @@ app.prepare().then(async () => {
       origin: dev ? '*' : undefined,
     },
     path: '/api/ws',
+    // Don't kill upgrade requests for paths Socket.io doesn't own — Next.js
+    // HMR uses the same httpServer for /_next/webpack-hmr, and engine.io's
+    // 1s destroyUpgrade timer races the HMR handshake over slow links.
+    destroyUpgrade: false,
   });
 
   // ─── Socket.io Authentication Middleware ───────────────

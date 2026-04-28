@@ -19,6 +19,7 @@ import {
 import {
   handleGitStatus,
   handleGitDiff,
+  handleGitDiffFile,
   handleGitBranches,
   handleGitLog,
   handleGitStage,
@@ -166,6 +167,15 @@ const { socket } = createConnection(config, {
 
       case 'GIT_DIFF':
         response = await handleGitDiff(command.id, command.projectPath, command.staged);
+        break;
+
+      case 'GIT_DIFF_FILE':
+        response = await handleGitDiffFile(
+          command.id,
+          command.projectPath,
+          command.path,
+          command.mode,
+        );
         break;
 
       case 'GIT_BRANCHES':

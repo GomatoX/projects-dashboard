@@ -1,6 +1,7 @@
 import simpleGit from 'simple-git';
+import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve, isAbsolute, relative } from 'node:path';
 import type {
   AgentEvent,
   GitStatus,
@@ -79,6 +80,92 @@ export async function handleGitDiff(
       type: 'COMMAND_ERROR',
       requestId,
       message: `Git diff failed: ${error instanceof Error ? error.message : 'Unknown'}`,
+    };
+  }
+}
+
+/**
+ * Surenka pilną originalią ir naujesnę failo versiją, kad UI galėtų
+ * parodyti side-by-side diff. Matome tris atvejus:
+ *  - 'unstaged'  → original = HEAD:path,        modified = darbinis failas iš disko
+ *  - 'staged'    → original = HEAD:path,        modified = :path (indekso versija)
+ *  - 'untracked' → original = '',               modified = darbinis failas iš disko
+ *
+ * Saugumas: `path` yra reliatyvus iki `projectPath`. Resolvinam ir
+ * patikrinam, kad galutinis kelias liktų projekto šaknyje, kitaip
+ * agent'as galėtų skaityti bet ką per `..`.
+ */
+export async function handleGitDiffFile(
+  requestId: string,
+  projectPath: string,
+  filePath: string,
+  mode: 'unstaged' | 'staged' | 'untracked',
+): Promise<AgentEvent> {
+  try {
+    const root = resolve(expandHome(projectPath));
+    const abs = isAbsolute(filePath) ? resolve(filePath) : resolve(root, filePath);
+    const rel = relative(root, abs);
+    if (rel.startsWith('..') || isAbsolute(rel)) {
+      return {
+        type: 'COMMAND_ERROR',
+        requestId,
+        message: 'Path escapes project root',
+      };
+    }
+
+    const g = git(projectPath);
+
+    let original = '';
+    let modified = '';
+    let isNew = false;
+    let isDeleted = false;
+
+    // Original
+    if (mode === 'untracked') {
+      original = '';
+      isNew = true;
+    } else {
+      try {
+        original = await g.show([`HEAD:${rel}`]);
+      } catch {
+        // Failo HEAD'e nėra → pridėtas (added).
+        original = '';
+        isNew = true;
+      }
+    }
+
+    // Modified
+    if (mode === 'staged') {
+      try {
+        modified = await g.show([`:${rel}`]);
+      } catch {
+        modified = '';
+        isDeleted = true;
+      }
+    } else {
+      // unstaged arba untracked → working tree
+      try {
+        modified = await readFile(abs, 'utf8');
+      } catch {
+        modified = '';
+        isDeleted = true;
+      }
+    }
+
+    return {
+      type: 'GIT_DIFF_FILE_RESULT',
+      requestId,
+      path: rel,
+      original,
+      modified,
+      isNew,
+      isDeleted,
+    };
+  } catch (error) {
+    return {
+      type: 'COMMAND_ERROR',
+      requestId,
+      message: `Git diff file failed: ${error instanceof Error ? error.message : 'Unknown'}`,
     };
   }
 }

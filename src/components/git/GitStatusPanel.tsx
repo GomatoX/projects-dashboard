@@ -33,6 +33,7 @@ import {
   IconArrowDown,
 } from '@tabler/icons-react';
 import type { GitStatus, GitFileChange } from '@/lib/socket/types';
+import { DiffViewerModal } from './DiffViewerModal';
 
 interface GitStatusPanelProps {
   status: GitStatus | null;
@@ -68,6 +69,13 @@ export function GitStatusPanel({
   const [pushing, setPushing] = useState(false);
   const [pulling, setPulling] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
+
+  // Diff peržiūra: spaudžiant failą atsidaro modalas su Monaco DiffEditor.
+  const [diffTarget, setDiffTarget] = useState<{
+    path: string;
+    mode: 'unstaged' | 'staged' | 'untracked';
+    statusChar: string;
+  } | null>(null);
 
   if (!status) return null;
 
@@ -150,6 +158,14 @@ export function GitStatusPanel({
 
   return (
     <Stack gap="lg">
+      <DiffViewerModal
+        opened={diffTarget !== null}
+        onClose={() => setDiffTarget(null)}
+        projectId={projectId}
+        filePath={diffTarget?.path ?? null}
+        mode={diffTarget?.mode ?? 'unstaged'}
+        statusChar={diffTarget?.statusChar}
+      />
       {/* Branch + Sync Info */}
       <Card>
         <Group justify="space-between">
@@ -226,6 +242,9 @@ export function GitStatusPanel({
                 onAction={() => handleUnstageFiles([file.path])}
                 actionLabel="Unstage"
                 actionIcon={<IconMinus size={12} />}
+                onView={() =>
+                  setDiffTarget({ path: file.path, mode: 'staged', statusChar: file.index })
+                }
               />
             ))}
           </Stack>
@@ -262,6 +281,13 @@ export function GitStatusPanel({
                 onAction={() => handleStageFiles([file.path])}
                 actionLabel="Stage"
                 actionIcon={<IconPlus size={12} />}
+                onView={() =>
+                  setDiffTarget({
+                    path: file.path,
+                    mode: 'unstaged',
+                    statusChar: file.working_dir,
+                  })
+                }
               />
             ))}
             {status.untracked.map((path) => (
@@ -272,6 +298,9 @@ export function GitStatusPanel({
                 onAction={() => handleStageFiles([path])}
                 actionLabel="Stage"
                 actionIcon={<IconPlus size={12} />}
+                onView={() =>
+                  setDiffTarget({ path, mode: 'untracked', statusChar: '?' })
+                }
               />
             ))}
           </Stack>
@@ -323,12 +352,14 @@ function FileRow({
   onAction,
   actionLabel,
   actionIcon,
+  onView,
 }: {
   file: GitFileChange;
   statusChar: string;
   onAction: () => void;
   actionLabel: string;
   actionIcon: React.ReactNode;
+  onView?: () => void;
 }) {
   const Icon = statusIcons[statusChar] || IconEdit;
   const color = statusColors[statusChar] || '#888';
@@ -338,22 +369,35 @@ function FileRow({
       justify="space-between"
       py={3}
       px={8}
+      gap={4}
       style={{
         borderRadius: 'var(--mantine-radius-xs)',
         transition: 'background-color 0.1s',
       }}
     >
-      <Group gap="xs" style={{ flex: 1, minWidth: 0 }}>
-        <ThemeIcon size="xs" variant="transparent" color={color}>
-          <Icon size={12} />
-        </ThemeIcon>
-        <Text size="xs" truncate style={{ flex: 1 }}>
-          {file.path}
-        </Text>
-        <Badge size="xs" variant="light" color={color} w={20} style={{ textAlign: 'center' }}>
-          {statusChar}
-        </Badge>
-      </Group>
+      <UnstyledButton
+        onClick={onView}
+        disabled={!onView}
+        style={{
+          flex: 1,
+          minWidth: 0,
+          cursor: onView ? 'pointer' : 'default',
+          borderRadius: 'var(--mantine-radius-xs)',
+          padding: '2px 4px',
+        }}
+      >
+        <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
+          <ThemeIcon size="xs" variant="transparent" color={color}>
+            <Icon size={12} />
+          </ThemeIcon>
+          <Text size="xs" truncate style={{ flex: 1 }}>
+            {file.path}
+          </Text>
+          <Badge size="xs" variant="light" color={color} w={20} style={{ textAlign: 'center' }}>
+            {statusChar}
+          </Badge>
+        </Group>
+      </UnstyledButton>
       <Tooltip label={actionLabel}>
         <ActionIcon variant="subtle" size="xs" onClick={onAction}>
           {actionIcon}

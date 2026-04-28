@@ -25,6 +25,16 @@ export type AgentCommand =
   // Git operations
   | { type: 'GIT_STATUS'; id: string; projectPath: string }
   | { type: 'GIT_DIFF'; id: string; projectPath: string; staged: boolean }
+  | {
+      type: 'GIT_DIFF_FILE';
+      id: string;
+      projectPath: string;
+      path: string;
+      // 'unstaged' = HEAD vs working tree
+      // 'staged'   = HEAD vs index
+      // 'untracked' = empty vs working tree (new file)
+      mode: 'unstaged' | 'staged' | 'untracked';
+    }
   | { type: 'GIT_BRANCHES'; id: string; projectPath: string }
   | { type: 'GIT_LOG'; id: string; projectPath: string; limit: number }
   | { type: 'GIT_STAGE'; id: string; projectPath: string; files: string[] }
@@ -167,6 +177,16 @@ export type AgentEvent =
   // Git events
   | { type: 'GIT_STATUS_RESULT'; requestId: string; data: GitStatus }
   | { type: 'GIT_DIFF_RESULT'; requestId: string; diff: string }
+  | {
+      type: 'GIT_DIFF_FILE_RESULT';
+      requestId: string;
+      path: string;
+      original: string;
+      modified: string;
+      // True kai failo nėra pradinėje versijoje (added) arba galutinėje (deleted).
+      isNew: boolean;
+      isDeleted: boolean;
+    }
   | { type: 'GIT_BRANCHES_RESULT'; requestId: string; branches: GitBranch[] }
   | { type: 'GIT_LOG_RESULT'; requestId: string; entries: GitLogEntry[] }
   | {

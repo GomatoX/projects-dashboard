@@ -47,3 +47,8 @@ next-env.d.ts
 /data/*.db-shm
 /data/*.backup-*
 /data/uploads/
+
+# local scratch & generated artifacts
+/scratch/
+/.playwright-mcp/
+/docs/superpowers/

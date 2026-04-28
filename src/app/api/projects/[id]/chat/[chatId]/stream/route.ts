@@ -21,6 +21,10 @@ import {
   unregisterLocalAbort,
 } from '@/lib/ai/local-cancel';
 import {
+  registerRemoteCancel,
+  unregisterRemoteCancel,
+} from '@/lib/ai/remote-cancel';
+import {
   DEFAULT_CLAUDE_PERMISSIONS,
   type AgentCommand,
   type ClaudeAttachment,
@@ -950,9 +954,7 @@ function handleRemoteStream(args: RemoteStreamArgs) {
               sessionId,
             });
 
-            socket.off('event', onEvent);
-            await markStreamEnd(projectId, chatId);
-            safeClose();
+            await cleanup();
             break;
           }
 
@@ -962,8 +964,6 @@ function handleRemoteStream(args: RemoteStreamArgs) {
               type: 'error',
               message: errorMessage,
             });
-
-            socket.off('event', onEvent);
 
             // Persist partial content if any
             try {
@@ -985,8 +985,7 @@ function handleRemoteStream(args: RemoteStreamArgs) {
             } catch (err) {
               console.error('[Chat/Remote] Failed to save partial message:', err);
             } finally {
-              await markStreamEnd(projectId, chatId);
-              safeClose();
+              await cleanup();
             }
             break;
           }
@@ -996,6 +995,28 @@ function handleRemoteStream(args: RemoteStreamArgs) {
             break;
         }
       };
+
+      // Single tear-down closure: detaches the socket listener, ends the
+      // active-streams counter + journal, and closes the SSE response.
+      // Idempotent — safe to call from multiple terminal paths.
+      let cleanedUp = false;
+      const cleanup = async () => {
+        if (cleanedUp) return;
+        cleanedUp = true;
+        try {
+          socket.off('event', onEvent);
+        } catch {
+          // best-effort
+        }
+        await markStreamEnd(projectId, chatId);
+        unregisterRemoteCancel(chatId);
+        safeClose();
+      };
+
+      // Expose cleanup to the cancel endpoint so a stuck stream (device
+      // disconnected before sending CLAUDE_DONE/CLAUDE_ERROR) can be
+      // force-released without a server restart.
+      registerRemoteCancel(chatId, cleanup);
 
       socket.on('event', onEvent);
 
@@ -1029,13 +1050,13 @@ function handleRemoteStream(args: RemoteStreamArgs) {
       // subscribers can pick up the in-flight turn via the subscribe
       // endpoint, which reads from the journal. We do NOT detach the
       // socket listener here either: it must keep appending events to
-      // the journal, and it self-detaches inside `onEvent` when CLAUDE_DONE
-      // or CLAUDE_ERROR fires.
+      // the journal, and it self-detaches inside `cleanup()` when
+      // CLAUDE_DONE or CLAUDE_ERROR fires.
       //
-      // Known gap: if the device disconnects without ever sending a
-      // terminal event (network partition, agent crash), `onEvent` stays
-      // attached and the journal stays `active` until the next server
-      // restart's `crashRecovery()` seals it. See task #12 for follow-up.
+      // If the device disconnects without ever sending a terminal event,
+      // the `cleanup` closure is still registered with `remote-cancel.ts`
+      // — `POST /cancel` will release it even with no live socket. The
+      // boot-time `crashRecovery()` is the last-resort backstop.
       request.signal.addEventListener('abort', () => {
         // Mark the response closed so safeEnqueue stops trying to write.
         // Do NOT call markStreamEnd, do NOT cancel the agent, do NOT
