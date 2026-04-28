@@ -30,6 +30,9 @@ import {
   type ClaudeAttachment,
   type ClaudePermissionConfig,
 } from '@/lib/socket/types';
+import { PreviewDetector } from '@/lib/ai/preview-detector';
+import { PREVIEW_SYSTEM_PROMPT } from '@/lib/ai/preview-system-prompt';
+import { type PreviewContentType } from '@/lib/ai/preview-types';
 
 /**
  * Tee an SSE event into both the HTTP response and the per-chat journal.
@@ -189,6 +192,9 @@ export async function POST(
       systemPrompt += '\n\n--- Project Context ---\n\n' + sections.join('\n\n');
     }
   }
+
+  // Inject preview panel instructions for every chat
+  systemPrompt += '\n\n' + PREVIEW_SYSTEM_PROMPT;
 
   // Build the prompt with conversation history
   const history = await db
@@ -422,6 +428,22 @@ function handleLocalStream(args: StreamArgs) {
             systemPrompt,
             tools: { type: 'preset', preset: 'claude_code' },
             canUseTool: async (toolName, input, opts) => {
+              // Handle show_preview: emit a preview event and short-circuit
+              if (toolName === 'show_preview') {
+                await writeEvent(safeEnqueue, encoder, chatId, {
+                  type: 'preview',
+                  id: nanoid(),
+                  contentType: (input as { contentType: PreviewContentType }).contentType,
+                  content: (input as { content: string }).content,
+                  title: (input as { title?: string }).title,
+                });
+                return {
+                  behavior: 'allow' as const,
+                  toolUseID: opts.toolUseID,
+                  updatedPermissions: opts.suggestions,
+                };
+              }
+
               // Emit tool activity for all tools (UI tracking)
               const meta = getToolMeta(toolName);
 
@@ -461,11 +483,14 @@ function handleLocalStream(args: StreamArgs) {
           },
         });
 
+        const previewDetector = new PreviewDetector();
+
         for await (const message of agentQuery) {
           const msg = message as SDKMessage;
 
           switch (msg.type) {
             case 'assistant': {
+              previewDetector.reset();
               // Complete assistant turn — extract text content
               const assistantMsg = msg as SDKAssistantMessage;
               const textBlocks = assistantMsg.message.content.filter(
@@ -538,6 +563,9 @@ function handleLocalStream(args: StreamArgs) {
                 if (delta.type === 'text_delta' && delta.text) {
                   currentTurnDeltas += delta.text;
                   await writeEvent(safeEnqueue, encoder, chatId, { type: 'text', text: delta.text });
+                  for (const preview of previewDetector.feed(delta.text)) {
+                    await writeEvent(safeEnqueue, encoder, chatId, preview as unknown as Record<string, unknown>);
+                  }
                 }
               }
               break;
@@ -830,6 +858,7 @@ function handleRemoteStream(args: RemoteStreamArgs) {
       });
 
       // ─── Listen for agent events filtered by sessionId ──
+      const previewDetector = new PreviewDetector();
       const onEvent = async (event: Record<string, unknown>) => {
         if (event.sessionId !== sessionId) return;
 
@@ -850,6 +879,9 @@ function handleRemoteStream(args: RemoteStreamArgs) {
             }
             fullContent += text;
             await writeEvent(safeEnqueue, encoder, chatId, { type: 'text', text });
+            for (const preview of previewDetector.feed(text)) {
+              await writeEvent(safeEnqueue, encoder, chatId, preview as unknown as Record<string, unknown>);
+            }
             break;
           }
 
