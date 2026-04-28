@@ -29,6 +29,7 @@
     "bcrypt": "^6.0.0",
     "better-auth": "^1.6.9",
     "drizzle-orm": "^0.45.2",
+    "mermaid": "^11.14.0",
     "nanoid": "^5.1.9",
     "next": "16.2.4",
     "octokit": "^5.0.5",
