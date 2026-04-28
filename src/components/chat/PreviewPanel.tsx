@@ -6,7 +6,7 @@ import {
   IconArrowsDiagonalMinimize2,
   IconX,
 } from '@tabler/icons-react';
-import { type PreviewState } from '@/lib/ai/preview-types';
+import { type PreviewItem } from '@/lib/ai/preview-types';
 import { DiffPreview } from './preview/DiffPreview';
 import { HtmlPreview } from './preview/HtmlPreview';
 import { MarkdownPreview } from './preview/MarkdownPreview';
@@ -14,9 +14,10 @@ import { MermaidPreview } from './preview/MermaidPreview';
 import { SvgPreview } from './preview/SvgPreview';
 
 interface PreviewPanelProps {
-  preview: PreviewState;
+  item: PreviewItem;
   isExpanded: boolean;
-  onClose: () => void;
+  /** Close the entire panel (rail stays visible if items.length > 0). */
+  onClosePanel: () => void;
   onToggleExpand: () => void;
 }
 
@@ -29,9 +30,9 @@ const CONTENT_TYPE_LABELS: Record<string, string> = {
 };
 
 export function PreviewPanel({
-  preview,
+  item,
   isExpanded,
-  onClose,
+  onClosePanel,
   onToggleExpand,
 }: PreviewPanelProps) {
   return (
@@ -39,17 +40,11 @@ export function PreviewPanel({
       style={{
         display: 'flex',
         flexDirection: 'column',
-        // Sized as a flex sibling of the chat column.  Expanded mode gives
-        // the preview ~2/3 of the row, collapsed gives a balanced split.
-        flexGrow: 0,
-        flexShrink: 0,
-        flexBasis: isExpanded ? '66%' : '50%',
-        minWidth: 320,
+        flex: 1,
+        minWidth: 0,
         height: '100%',
         minHeight: 0,
-        borderLeft: '1px solid var(--mantine-color-dark-6)',
         background: 'var(--mantine-color-dark-7)',
-        transition: 'flex-basis 200ms cubic-bezier(0.4, 0, 0.2, 1)',
         overflow: 'hidden',
       }}
     >
@@ -74,15 +69,15 @@ export function PreviewPanel({
             tt="uppercase"
             style={{ letterSpacing: 0.5, flexShrink: 0 }}
           >
-            {CONTENT_TYPE_LABELS[preview.contentType] ?? preview.contentType}
+            {CONTENT_TYPE_LABELS[item.contentType] ?? item.contentType}
           </Text>
-          {preview.title && (
+          {item.title && (
             <>
               <Text c="dimmed" size="xs" style={{ flexShrink: 0 }}>
                 ·
               </Text>
               <Text size="sm" fw={500} truncate style={{ minWidth: 0 }}>
-                {preview.title}
+                {item.title}
               </Text>
             </>
           )}
@@ -112,7 +107,7 @@ export function PreviewPanel({
               variant="subtle"
               size="sm"
               color="gray"
-              onClick={onClose}
+              onClick={onClosePanel}
               aria-label="Close preview"
             >
               <IconX size={14} />
@@ -121,17 +116,21 @@ export function PreviewPanel({
         </Group>
       </Group>
 
-      {/* Content */}
-      <Box style={{ flex: 1, minHeight: 0, overflow: 'hidden', position: 'relative' }}>
-        {preview.contentType === 'html' && <HtmlPreview content={preview.content} />}
-        {preview.contentType === 'markdown' && (
-          <MarkdownPreview content={preview.content} />
+      {/* Content — keyed by item.id + updatedAt so the renderer remounts on
+          updates within the same item (matches the v1 `previewRevision` trick). */}
+      <Box
+        key={`${item.id}:${item.updatedAt}`}
+        style={{ flex: 1, minHeight: 0, overflow: 'hidden', position: 'relative' }}
+      >
+        {item.contentType === 'html' && <HtmlPreview content={item.content} />}
+        {item.contentType === 'markdown' && (
+          <MarkdownPreview content={item.content} />
         )}
-        {preview.contentType === 'mermaid' && (
-          <MermaidPreview content={preview.content} />
+        {item.contentType === 'mermaid' && (
+          <MermaidPreview content={item.content} />
         )}
-        {preview.contentType === 'svg' && <SvgPreview content={preview.content} />}
-        {preview.contentType === 'diff' && <DiffPreview content={preview.content} />}
+        {item.contentType === 'svg' && <SvgPreview content={item.content} />}
+        {item.contentType === 'diff' && <DiffPreview content={item.content} />}
       </Box>
     </Box>
   );

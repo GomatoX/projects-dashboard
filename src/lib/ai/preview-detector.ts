@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid';
-import { type PreviewContentType, type PreviewEvent } from './preview-types.js';
+import { type PreviewContentType, type PreviewEvent } from './preview-types';
 
 // Matches: ```preview-<type> [optional title]\n<content>``` on its own line.
 // The `m` flag makes ^ match start-of-line so we don't accidentally match
@@ -51,22 +51,23 @@ export class PreviewDetector {
 }
 
 /**
- * One-shot scan: returns the LAST preview block found in `text`, or null if
- * none.  Used to restore the side preview panel after a page reload from a
- * persisted assistant message — the chat_messages.content column still
- * contains the original ` ```preview-* ` fence even after the journal has
- * been swept.
+ * One-shot scan: returns ALL preview blocks found in `text`, in document
+ * order. Used to restore the side preview panel after a page reload from
+ * persisted assistant messages — the chat_messages.content column still
+ * contains the original ` ```preview-* ` fences even after the journal has
+ * been swept. Callers replay the result through `mergePreviewItem` to
+ * rebuild the multi-item PreviewState.
  */
-export function extractLastPreview(text: string): PreviewEvent | null {
+export function extractAllPreviews(text: string): PreviewEvent[] {
   const re = new RegExp(FENCE_PATTERN.source, FENCE_PATTERN.flags);
+  const events: PreviewEvent[] = [];
   let match: RegExpExecArray | null;
-  let last: PreviewEvent | null = null;
   while ((match = re.exec(text)) !== null) {
     const [, lang, rawTitle, rawContent] = match;
     const contentType = lang.replace('preview-', '') as PreviewContentType;
     const title = rawTitle?.trim() || undefined;
     const content = rawContent.replace(/\n$/, '');
-    last = { type: 'preview', id: nanoid(8), contentType, content, title };
+    events.push({ type: 'preview', id: nanoid(8), contentType, content, title });
   }
-  return last;
+  return events;
 }
