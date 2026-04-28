@@ -19,19 +19,22 @@ import {
   IconHistory,
   IconAlertTriangle,
   IconRefresh,
+  IconBrandGithub,
 } from '@tabler/icons-react';
 import type { GitStatus, GitBranch, GitLogEntry } from '@/lib/socket/types';
 import { GitStatusPanel } from './GitStatusPanel';
 import { GitHistoryPanel } from './GitHistoryPanel';
 import { GitBranchPanel } from './GitBranchPanel';
+import { GitHubPanel } from '@/components/github/GitHubPanel';
 
 interface GitPanelProps {
   projectId: string;
   projectPath: string;
   deviceId: string | null;
+  github: string | null;
 }
 
-export function GitPanel({ projectId, projectPath, deviceId }: GitPanelProps) {
+export function GitPanel({ projectId, projectPath, deviceId, github }: GitPanelProps) {
   const [status, setStatus] = useState<GitStatus | null>(null);
   const [branches, setBranches] = useState<GitBranch[]>([]);
   const [history, setHistory] = useState<GitLogEntry[]>([]);
@@ -199,6 +202,12 @@ export function GitPanel({ projectId, projectPath, deviceId }: GitPanelProps) {
         >
           Branches
         </Tabs.Tab>
+        <Tabs.Tab
+          value="prs"
+          leftSection={<IconBrandGithub size={16} />}
+        >
+          Pull Requests
+        </Tabs.Tab>
       </Tabs.List>
 
       <Tabs.Panel value="changes">
@@ -228,6 +237,10 @@ export function GitPanel({ projectId, projectPath, deviceId }: GitPanelProps) {
             await Promise.all([refreshBranches(), refreshStatus()]);
           }}
         />
+      </Tabs.Panel>
+
+      <Tabs.Panel value="prs">
+        <GitHubPanel projectId={projectId} github={github} />
       </Tabs.Panel>
     </Tabs>
   );

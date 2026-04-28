@@ -168,6 +168,7 @@ export default function ProjectDetailPage() {
             projectId={project.id}
             projectPath={project.path}
             deviceId={project.deviceId}
+            github={project.github}
           />
         </Tabs.Panel>
 
