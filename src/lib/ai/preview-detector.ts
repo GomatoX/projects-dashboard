@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid';
-import { type PreviewContentType, type PreviewEvent } from './preview-types.js';
+import { type PreviewContentType, type PreviewEvent } from './preview-types';
 
 // Matches: ```preview-<type> [optional title]\n<content>``` on its own line.
 // The `m` flag makes ^ match start-of-line so we don't accidentally match

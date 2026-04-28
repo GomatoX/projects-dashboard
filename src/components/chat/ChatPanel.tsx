@@ -45,8 +45,15 @@ interface UploadedAttachment {
 }
 import { ToolApprovalCard, ToolActivityBadge, type PermissionRequest, type ToolActivity } from './ToolApprovalCard';
 import { PreviewPanel } from './PreviewPanel';
-import { type PreviewState } from '@/lib/ai/preview-types';
-import { extractLastPreview } from '@/lib/ai/preview-detector';
+import { PreviewRail } from './PreviewRail';
+import { ResizeHandle } from './ResizeHandle';
+import {
+  EMPTY_PREVIEW_STATE,
+  type PreviewState,
+} from '@/lib/ai/preview-types';
+import { extractAllPreviews } from '@/lib/ai/preview-detector';
+import { mergePreviewItem, removePreviewItem } from '@/lib/ai/preview-merge';
+import { useLocalStorage } from '@mantine/hooks';
 
 interface Chat {
   id: string;
@@ -141,20 +148,52 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
   const [previewRevision, setPreviewRevision] = useState(0);
   const lastPreviewsRef = useRef<Map<string, PreviewState>>(new Map());
 
-  const currentPreview = activeChat
-    ? (lastPreviewsRef.current.get(activeChat) ?? null)
-    : null;
+  // Persisted chat/preview split — value is the panel-area percentage of the
+  // outer flex row (i.e. chat column gets 100 - split%). Clamped on read so a
+  // stale localStorage value (e.g. set before clamps existed) can't break the
+  // layout.
+  const [splitPercentRaw, setSplitPercentRaw] = useLocalStorage<number>({
+    key: 'chat:previewSplitPercent',
+    defaultValue: 50,
+  });
+  const splitPercent = Math.min(80, Math.max(20, splitPercentRaw));
+  const setSplitPercent = useCallback(
+    (next: number) => {
+      setSplitPercentRaw(Math.min(80, Math.max(20, next)));
+    },
+    [setSplitPercentRaw],
+  );
 
-  // Re-open the preview panel (collapsed) when switching to a chat that had a preview
+  const previewState: PreviewState = activeChat
+    ? (lastPreviewsRef.current.get(activeChat) ?? EMPTY_PREVIEW_STATE)
+    : EMPTY_PREVIEW_STATE;
+  const activeItem = previewState.items.find((i) => i.id === previewState.activeId) ?? null;
+  const hasItems = previewState.items.length > 0;
+
+  const writePreview = useCallback(
+    (chatId: string, mut: (prev: PreviewState) => PreviewState) => {
+      const prev = lastPreviewsRef.current.get(chatId) ?? EMPTY_PREVIEW_STATE;
+      const next = mut(prev);
+      if (next === prev) return;
+      lastPreviewsRef.current.set(chatId, next);
+      setPreviewRevision((r) => r + 1);
+    },
+    [],
+  );
+
+  // Re-open the preview panel (collapsed) when switching to a chat that has any items
   useEffect(() => {
     if (!activeChat) return;
     const saved = lastPreviewsRef.current.get(activeChat);
-    if (saved) {
+    if (saved && saved.items.length > 0) {
       setPreviewOpen(true);
+    } else {
+      setPreviewOpen(false);
     }
-    // Reset expanded state on every chat switch — expanding is an explicit user action
     setPreviewExpanded(false);
   }, [activeChat]);
+
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const streaming = useStreamingState();
   // Read the current streaming state slice for the active chat once per render.
@@ -214,33 +253,25 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
           isStreaming ? withAdded(prev, chatId) : withRemoved(prev, chatId),
         );
 
-        // Restore the side preview from the most recent assistant message
-        // that contains a ` ```preview-* ` fence. The chat_messages row is
-        // the durable record after the journal's 30s retention expires, so
-        // this is what makes the panel survive page reloads. We scan from
-        // newest backwards so an older message's preview can't shadow a
-        // newer one. Only update if not already set (live stream wins).
+        // Restore the side previews from ALL assistant messages with preview
+        // fences (oldest → newest), replayed through the merge logic so the
+        // final state matches what the live stream would have produced. Only
+        // run this when we don't already have state for this chat (a live
+        // stream would have populated it already).
         if (!lastPreviewsRef.current.has(chatId)) {
-          for (let i = msgs.length - 1; i >= 0; i--) {
-            const m = msgs[i];
+          let restored: PreviewState = EMPTY_PREVIEW_STATE;
+          for (const m of msgs) {
             if (m.role !== 'assistant' || !m.content) continue;
-            const ev = extractLastPreview(m.content);
-            if (ev) {
-              const ps: PreviewState = {
-                id: ev.id,
-                contentType: ev.contentType,
-                content: ev.content,
-                title: ev.title,
-              };
-              lastPreviewsRef.current.set(chatId, ps);
-              setPreviewRevision((r) => r + 1);
-              // Auto-open the panel when restoring on the currently active
-              // chat — the chat-switch useEffect ran before this async fetch
-              // resolved, so it saw an empty ref and didn't open the panel.
-              if (activeChatRef.current === chatId) {
-                setPreviewOpen(true);
-              }
-              break;
+            const events = extractAllPreviews(m.content);
+            for (const ev of events) {
+              restored = mergePreviewItem(restored, ev, Date.now());
+            }
+          }
+          if (restored.items.length > 0) {
+            lastPreviewsRef.current.set(chatId, restored);
+            setPreviewRevision((r) => r + 1);
+            if (activeChatRef.current === chatId) {
+              setPreviewOpen(true);
             }
           }
         }
@@ -324,22 +355,23 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
         return;
       }
       if (event.type === 'preview') {
-        const ps: PreviewState = {
-          id: event.id as string,
-          contentType: event.contentType as PreviewState['contentType'],
-          content: event.content as string,
-          title: event.title as string | undefined,
-        };
-        streaming.setPreview(chatId, ps);
-        lastPreviewsRef.current.set(chatId, ps);
+        writePreview(chatId, (prev) =>
+          mergePreviewItem(
+            prev,
+            {
+              type: 'preview',
+              id: event.id as string,
+              contentType: event.contentType as 'html' | 'markdown' | 'mermaid' | 'svg' | 'diff',
+              content: event.content as string,
+              title: event.title as string | undefined,
+            },
+            Date.now(),
+          ),
+        );
         setPreviewOpen(true);
-        setPreviewRevision((r) => r + 1);
         return;
       }
       if (event.type === 'done') {
-        // Note: preview state is persisted to lastPreviewsRef in the 'preview'
-        // event handler above — the React state update from setPreview() may not
-        // have committed by the time 'done' fires, so reading it here is unreliable.
         streaming.end(chatId);
         if (activeChatRef.current === chatId) {
           // Refetch messages so the persisted assistant row replaces the
@@ -366,7 +398,7 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
         streaming.end(chatId);
       }
     },
-    [streaming, fetchMessages, fetchChats],
+    [streaming, fetchMessages, fetchChats, writePreview],
   );
 
   // ─── Reattach to a server-side live stream ──────────────────────────────
@@ -632,20 +664,21 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
         // the same separation as the persisted row will after refetch.
         streaming.appendTurnBreak(chatId);
       } else if (event.type === 'preview') {
-        const ps: PreviewState = {
-          id: event.id as string,
-          contentType: event.contentType as PreviewState['contentType'],
-          content: event.content as string,
-          title: event.title as string | undefined,
-        };
-        streaming.setPreview(chatId, ps);
-        lastPreviewsRef.current.set(chatId, ps);
+        writePreview(chatId, (prev) =>
+          mergePreviewItem(
+            prev,
+            {
+              type: 'preview',
+              id: event.id as string,
+              contentType: event.contentType as 'html' | 'markdown' | 'mermaid' | 'svg' | 'diff',
+              content: event.content as string,
+              title: event.title as string | undefined,
+            },
+            Date.now(),
+          ),
+        );
         setPreviewOpen(true);
-        setPreviewRevision((r) => r + 1);
       } else if (event.type === 'done') {
-        // Note: preview state is persisted to lastPreviewsRef in the 'preview'
-        // event handler above — React state may not have committed by the time
-        // 'done' fires, so reading streaming.get(chatId)?.preview here is unreliable.
         // The server now persists the assistant row BEFORE emitting
         // `done`, so refetching /messages here is race-free and gives us
         // the canonical row (with full tool_uses, tokens, etc.) — which
@@ -980,6 +1013,7 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
 
   return (
     <Box
+      ref={containerRef}
       style={{
         display: 'flex',
         height: '100%',
@@ -1396,16 +1430,58 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
         )}
       </Box>
 
-      {/* Preview panel — rendered when a preview event has been received.
-          key={previewRevision} ensures the panel refreshes when new preview
-          content arrives for the same chat (ref mutation alone won't re-render). */}
-      {previewOpen && currentPreview && (
-        <PreviewPanel
-          key={previewRevision}
-          preview={currentPreview}
-          isExpanded={previewExpanded}
-          onClose={() => setPreviewOpen(false)}
-          onToggleExpand={() => setPreviewExpanded((e) => !e)}
+      {/* Preview dock: rail is always visible whenever any preview exists for
+          this chat; resize handle + panel content are conditional on previewOpen. */}
+      {hasItems && previewOpen && activeItem && (
+        <>
+          <ResizeHandle
+            onResize={setSplitPercent}
+            containerRef={containerRef}
+          />
+          <Box
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              flexGrow: 0,
+              flexShrink: 0,
+              flexBasis: `${previewExpanded ? Math.max(splitPercent, 66) : splitPercent}%`,
+              minWidth: 280,
+              height: '100%',
+              minHeight: 0,
+              borderLeft: '1px solid var(--mantine-color-dark-6)',
+              background: 'var(--mantine-color-dark-7)',
+              transition: 'flex-basis 200ms cubic-bezier(0.4, 0, 0.2, 1)',
+              overflow: 'hidden',
+            }}
+          >
+            <PreviewPanel
+              key={`${activeItem.id}:${previewRevision}`}
+              item={activeItem}
+              isExpanded={previewExpanded}
+              onClosePanel={() => setPreviewOpen(false)}
+              onToggleExpand={() => setPreviewExpanded((e) => !e)}
+            />
+          </Box>
+        </>
+      )}
+      {hasItems && activeChat && (
+        <PreviewRail
+          items={previewState.items}
+          activeId={previewState.activeId}
+          panelOpen={previewOpen}
+          onSelect={(id) => {
+            writePreview(activeChat, (prev) => ({ ...prev, activeId: id }));
+            setPreviewOpen(true);
+          }}
+          onCloseItem={(id) => {
+            writePreview(activeChat, (prev) => removePreviewItem(prev, id));
+            // Close the panel if the rail is now empty.
+            const after = lastPreviewsRef.current.get(activeChat);
+            if (!after || after.items.length === 0) {
+              setPreviewOpen(false);
+            }
+          }}
+          onTogglePanel={() => setPreviewOpen((o) => !o)}
         />
       )}
     </Box>

@@ -3,7 +3,7 @@ import {
   type PreviewEvent,
   type PreviewItem,
   type PreviewState,
-} from './preview-types.js';
+} from './preview-types';
 
 /**
  * Merge a newly-arrived `PreviewEvent` into an existing `PreviewState`,
