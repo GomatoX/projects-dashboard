@@ -52,3 +52,6 @@ next-env.d.ts
 /scratch/
 /.playwright-mcp/
 /docs/superpowers/
+
+# git worktrees (local dev isolation)
+/.worktrees/
