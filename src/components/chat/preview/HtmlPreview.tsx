@@ -9,8 +9,14 @@ export function HtmlPreview({ content }: HtmlPreviewProps) {
     <iframe
       srcDoc={content}
       sandbox="allow-scripts"
-      className="w-full h-full border-0"
       title="HTML Preview"
+      style={{
+        width: '100%',
+        height: '100%',
+        border: 0,
+        display: 'block',
+        background: '#fff',
+      }}
     />
   );
 }

@@ -1,5 +1,6 @@
 'use client';
 
+import { Typography } from '@mantine/core';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -9,8 +10,16 @@ interface MarkdownPreviewProps {
 
 export function MarkdownPreview({ content }: MarkdownPreviewProps) {
   return (
-    <div className="prose prose-sm dark:prose-invert max-w-none p-4 overflow-auto h-full">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+    <div
+      style={{
+        height: '100%',
+        overflow: 'auto',
+        padding: 16,
+      }}
+    >
+      <Typography>
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+      </Typography>
     </div>
   );
 }

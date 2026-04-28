@@ -1,6 +1,11 @@
 'use client';
 
-import { Maximize2, Minimize2, X } from 'lucide-react';
+import { ActionIcon, Box, Group, Text, Tooltip } from '@mantine/core';
+import {
+  IconArrowsDiagonal,
+  IconArrowsDiagonalMinimize2,
+  IconX,
+} from '@tabler/icons-react';
 import { type PreviewState } from '@/lib/ai/preview-types';
 import { DiffPreview } from './preview/DiffPreview';
 import { HtmlPreview } from './preview/HtmlPreview';
@@ -23,53 +28,111 @@ const CONTENT_TYPE_LABELS: Record<string, string> = {
   diff: 'Diff',
 };
 
-export function PreviewPanel({ preview, isExpanded, onClose, onToggleExpand }: PreviewPanelProps) {
+export function PreviewPanel({
+  preview,
+  isExpanded,
+  onClose,
+  onToggleExpand,
+}: PreviewPanelProps) {
   return (
-    <div
-      className={[
-        'flex flex-col border-l bg-background transition-all duration-200',
-        isExpanded ? 'w-2/3' : 'w-1/2',
-      ].join(' ')}
+    <Box
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        // Sized as a flex sibling of the chat column.  Expanded mode gives
+        // the preview ~2/3 of the row, collapsed gives a balanced split.
+        flexGrow: 0,
+        flexShrink: 0,
+        flexBasis: isExpanded ? '66%' : '50%',
+        minWidth: 320,
+        height: '100%',
+        minHeight: 0,
+        borderLeft: '1px solid var(--mantine-color-dark-6)',
+        background: 'var(--mantine-color-dark-7)',
+        transition: 'flex-basis 200ms cubic-bezier(0.4, 0, 0.2, 1)',
+        overflow: 'hidden',
+      }}
     >
       {/* Header */}
-      <div className="flex items-center gap-2 px-3 py-2 border-b shrink-0">
-        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-          {CONTENT_TYPE_LABELS[preview.contentType] ?? preview.contentType}
-        </span>
-        {preview.title && (
-          <>
-            <span className="text-muted-foreground/40">·</span>
-            <span className="text-sm font-medium truncate flex-1">{preview.title}</span>
-          </>
-        )}
-        {!preview.title && <span className="flex-1" />}
+      <Group
+        justify="space-between"
+        wrap="nowrap"
+        gap="xs"
+        px="sm"
+        py={6}
+        style={{
+          borderBottom: '1px solid var(--mantine-color-dark-5)',
+          flexShrink: 0,
+          background: 'var(--mantine-color-dark-8)',
+        }}
+      >
+        <Group gap={8} wrap="nowrap" style={{ minWidth: 0, flex: 1 }}>
+          <Text
+            size="xs"
+            fw={600}
+            c="dimmed"
+            tt="uppercase"
+            style={{ letterSpacing: 0.5, flexShrink: 0 }}
+          >
+            {CONTENT_TYPE_LABELS[preview.contentType] ?? preview.contentType}
+          </Text>
+          {preview.title && (
+            <>
+              <Text c="dimmed" size="xs" style={{ flexShrink: 0 }}>
+                ·
+              </Text>
+              <Text size="sm" fw={500} truncate style={{ minWidth: 0 }}>
+                {preview.title}
+              </Text>
+            </>
+          )}
+        </Group>
 
-        <div className="flex items-center gap-0.5 shrink-0">
-          <button
-            onClick={onToggleExpand}
-            title={isExpanded ? 'Collapse preview' : 'Expand preview'}
-            className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+        <Group gap={2} wrap="nowrap" style={{ flexShrink: 0 }}>
+          <Tooltip
+            label={isExpanded ? 'Collapse preview' : 'Expand preview'}
+            withArrow
           >
-            {isExpanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
-          </button>
-          <button
-            onClick={onClose}
-            title="Close preview"
-            className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      </div>
+            <ActionIcon
+              variant="subtle"
+              size="sm"
+              color="gray"
+              onClick={onToggleExpand}
+              aria-label={isExpanded ? 'Collapse preview' : 'Expand preview'}
+            >
+              {isExpanded ? (
+                <IconArrowsDiagonalMinimize2 size={14} />
+              ) : (
+                <IconArrowsDiagonal size={14} />
+              )}
+            </ActionIcon>
+          </Tooltip>
+          <Tooltip label="Close preview" withArrow>
+            <ActionIcon
+              variant="subtle"
+              size="sm"
+              color="gray"
+              onClick={onClose}
+              aria-label="Close preview"
+            >
+              <IconX size={14} />
+            </ActionIcon>
+          </Tooltip>
+        </Group>
+      </Group>
 
       {/* Content */}
-      <div className="flex-1 min-h-0 overflow-hidden">
+      <Box style={{ flex: 1, minHeight: 0, overflow: 'hidden', position: 'relative' }}>
         {preview.contentType === 'html' && <HtmlPreview content={preview.content} />}
-        {preview.contentType === 'markdown' && <MarkdownPreview content={preview.content} />}
-        {preview.contentType === 'mermaid' && <MermaidPreview content={preview.content} />}
+        {preview.contentType === 'markdown' && (
+          <MarkdownPreview content={preview.content} />
+        )}
+        {preview.contentType === 'mermaid' && (
+          <MermaidPreview content={preview.content} />
+        )}
         {preview.contentType === 'svg' && <SvgPreview content={preview.content} />}
         {preview.contentType === 'diff' && <DiffPreview content={preview.content} />}
-      </div>
-    </div>
+      </Box>
+    </Box>
   );
 }

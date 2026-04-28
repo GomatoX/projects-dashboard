@@ -46,6 +46,7 @@ interface UploadedAttachment {
 import { ToolApprovalCard, ToolActivityBadge, type PermissionRequest, type ToolActivity } from './ToolApprovalCard';
 import { PreviewPanel } from './PreviewPanel';
 import { type PreviewState } from '@/lib/ai/preview-types';
+import { extractLastPreview } from '@/lib/ai/preview-detector';
 
 interface Chat {
   id: string;
@@ -205,13 +206,44 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
         const data = await res.json();
         // Tolerate the legacy array-shaped response in case anything still
         // returns it (older client cache, dev hot-reload, etc.).
-        const msgs = Array.isArray(data) ? data : (data.messages ?? []);
+        const msgs: ChatMsg[] = Array.isArray(data) ? data : (data.messages ?? []);
         const isStreaming =
           !Array.isArray(data) && Boolean(data.isStreaming);
         setMessages(msgs);
         setServerStreamingChats((prev) =>
           isStreaming ? withAdded(prev, chatId) : withRemoved(prev, chatId),
         );
+
+        // Restore the side preview from the most recent assistant message
+        // that contains a ` ```preview-* ` fence. The chat_messages row is
+        // the durable record after the journal's 30s retention expires, so
+        // this is what makes the panel survive page reloads. We scan from
+        // newest backwards so an older message's preview can't shadow a
+        // newer one. Only update if not already set (live stream wins).
+        if (!lastPreviewsRef.current.has(chatId)) {
+          for (let i = msgs.length - 1; i >= 0; i--) {
+            const m = msgs[i];
+            if (m.role !== 'assistant' || !m.content) continue;
+            const ev = extractLastPreview(m.content);
+            if (ev) {
+              const ps: PreviewState = {
+                id: ev.id,
+                contentType: ev.contentType,
+                content: ev.content,
+                title: ev.title,
+              };
+              lastPreviewsRef.current.set(chatId, ps);
+              setPreviewRevision((r) => r + 1);
+              // Auto-open the panel when restoring on the currently active
+              // chat — the chat-switch useEffect ran before this async fetch
+              // resolved, so it saw an empty ref and didn't open the panel.
+              if (activeChatRef.current === chatId) {
+                setPreviewOpen(true);
+              }
+              break;
+            }
+          }
+        }
       } catch {
         setMessages([]);
       }
@@ -1090,6 +1122,7 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
       <Box
         style={{
           flex: 1,
+          minWidth: 0,
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',

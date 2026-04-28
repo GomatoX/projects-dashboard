@@ -49,3 +49,24 @@ export class PreviewDetector {
     this.processedCount = 0;
   }
 }
+
+/**
+ * One-shot scan: returns the LAST preview block found in `text`, or null if
+ * none.  Used to restore the side preview panel after a page reload from a
+ * persisted assistant message — the chat_messages.content column still
+ * contains the original ` ```preview-* ` fence even after the journal has
+ * been swept.
+ */
+export function extractLastPreview(text: string): PreviewEvent | null {
+  const re = new RegExp(FENCE_PATTERN.source, FENCE_PATTERN.flags);
+  let match: RegExpExecArray | null;
+  let last: PreviewEvent | null = null;
+  while ((match = re.exec(text)) !== null) {
+    const [, lang, rawTitle, rawContent] = match;
+    const contentType = lang.replace('preview-', '') as PreviewContentType;
+    const title = rawTitle?.trim() || undefined;
+    const content = rawContent.replace(/\n$/, '');
+    last = { type: 'preview', id: nanoid(8), contentType, content, title };
+  }
+  return last;
+}

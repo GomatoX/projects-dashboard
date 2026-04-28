@@ -48,7 +48,15 @@ export function MermaidPreview({ content }: MermaidPreviewProps) {
   return (
     <div
       ref={containerRef}
-      className="p-4 flex justify-center items-start overflow-auto h-full [&_svg]:max-w-full"
+      style={{
+        height: '100%',
+        padding: 16,
+        overflow: 'auto',
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'flex-start',
+        background: '#fff',
+      }}
     />
   );
 }
