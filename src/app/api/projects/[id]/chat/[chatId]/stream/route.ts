@@ -32,7 +32,6 @@ import {
 } from '@/lib/socket/types';
 import { PreviewDetector } from '@/lib/ai/preview-detector';
 import { PREVIEW_SYSTEM_PROMPT } from '@/lib/ai/preview-system-prompt';
-import { type PreviewContentType } from '@/lib/ai/preview-types';
 
 /**
  * Tee an SSE event into both the HTTP response and the per-chat journal.
@@ -428,21 +427,9 @@ function handleLocalStream(args: StreamArgs) {
             systemPrompt,
             tools: { type: 'preset', preset: 'claude_code' },
             canUseTool: async (toolName, input, opts) => {
-              // Handle show_preview: emit a preview event and short-circuit
-              if (toolName === 'show_preview') {
-                await writeEvent(safeEnqueue, encoder, chatId, {
-                  type: 'preview',
-                  id: nanoid(),
-                  contentType: (input as { contentType: PreviewContentType }).contentType,
-                  content: (input as { content: string }).content,
-                  title: (input as { title?: string }).title,
-                });
-                return {
-                  behavior: 'allow' as const,
-                  toolUseID: opts.toolUseID,
-                  updatedPermissions: opts.suggestions,
-                };
-              }
+              // Preview content is delivered exclusively via fenced blocks detected by
+              // PreviewDetector — `show_preview` is not in the claude_code tool preset
+              // so this callback will never fire for it.
 
               // Emit tool activity for all tools (UI tracking)
               const meta = getToolMeta(toolName);
@@ -564,7 +551,7 @@ function handleLocalStream(args: StreamArgs) {
                   currentTurnDeltas += delta.text;
                   await writeEvent(safeEnqueue, encoder, chatId, { type: 'text', text: delta.text });
                   for (const preview of previewDetector.feed(delta.text)) {
-                    await writeEvent(safeEnqueue, encoder, chatId, preview as unknown as Record<string, unknown>);
+                    await writeEvent(safeEnqueue, encoder, chatId, { ...preview });
                   }
                 }
               }
@@ -872,6 +859,7 @@ function handleRemoteStream(args: RemoteStreamArgs) {
             // whatever the agent said before invoking the tool.
             if (pendingTurnBreak) {
               pendingTurnBreak = false;
+              previewDetector.reset(); // new assistant turn — clear accumulated text
               fullContent += '\n\n';
               await writeEvent(safeEnqueue, encoder, chatId, {
                 type: 'turn_break',
@@ -880,7 +868,7 @@ function handleRemoteStream(args: RemoteStreamArgs) {
             fullContent += text;
             await writeEvent(safeEnqueue, encoder, chatId, { type: 'text', text });
             for (const preview of previewDetector.feed(text)) {
-              await writeEvent(safeEnqueue, encoder, chatId, preview as unknown as Record<string, unknown>);
+              await writeEvent(safeEnqueue, encoder, chatId, { ...preview });
             }
             break;
           }

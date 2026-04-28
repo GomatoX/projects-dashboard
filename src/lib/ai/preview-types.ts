@@ -3,7 +3,7 @@ export type PreviewContentType = 'html' | 'markdown' | 'mermaid' | 'svg' | 'diff
 /** Shape of the `preview` SSE event written to the journal. */
 export interface PreviewEvent {
   type: 'preview';
-  /** Stable ID — used to identify which preview to replace on the client. */
+  /** Stable ID for the event record — last event wins on the client (no replace-by-id logic). */
   id: string;
   contentType: PreviewContentType;
   content: string;

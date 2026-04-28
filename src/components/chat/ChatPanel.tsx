@@ -144,13 +144,15 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
     ? (lastPreviewsRef.current.get(activeChat) ?? null)
     : null;
 
-  // Re-open the preview panel when switching to a chat that had a preview
+  // Re-open the preview panel (collapsed) when switching to a chat that had a preview
   useEffect(() => {
     if (!activeChat) return;
     const saved = lastPreviewsRef.current.get(activeChat);
     if (saved) {
       setPreviewOpen(true);
     }
+    // Reset expanded state on every chat switch — expanding is an explicit user action
+    setPreviewExpanded(false);
   }, [activeChat]);
 
   const streaming = useStreamingState();
@@ -303,11 +305,9 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
         return;
       }
       if (event.type === 'done') {
-        const livePreview = streaming.get(chatId)?.preview;
-        if (livePreview) {
-          lastPreviewsRef.current.set(chatId, livePreview);
-          setPreviewRevision((r) => r + 1);
-        }
+        // Note: preview state is persisted to lastPreviewsRef in the 'preview'
+        // event handler above — the React state update from setPreview() may not
+        // have committed by the time 'done' fires, so reading it here is unreliable.
         streaming.end(chatId);
         if (activeChatRef.current === chatId) {
           // Refetch messages so the persisted assistant row replaces the
@@ -611,13 +611,9 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
         setPreviewOpen(true);
         setPreviewRevision((r) => r + 1);
       } else if (event.type === 'done') {
-        // Persist preview state before clearing the stream so the panel
-        // stays visible after the turn finishes.
-        const livePreview = streaming.get(chatId)?.preview;
-        if (livePreview) {
-          lastPreviewsRef.current.set(chatId, livePreview);
-          setPreviewRevision((r) => r + 1);
-        }
+        // Note: preview state is persisted to lastPreviewsRef in the 'preview'
+        // event handler above — React state may not have committed by the time
+        // 'done' fires, so reading streaming.get(chatId)?.preview here is unreliable.
         // The server now persists the assistant row BEFORE emitting
         // `done`, so refetching /messages here is race-free and gives us
         // the canonical row (with full tool_uses, tokens, etc.) — which
