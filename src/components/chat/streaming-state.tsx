@@ -32,7 +32,6 @@ import type {
   PermissionRequest,
   ToolActivity,
 } from './ToolApprovalCard';
-import { type PreviewState } from '@/lib/ai/preview-types';
 
 export interface ChatStreamState {
   content: string;
@@ -41,7 +40,6 @@ export interface ChatStreamState {
   sessionId: string | null;
   lastEventSeq: number;
   active: boolean;
-  preview: PreviewState | null;
 }
 
 // Frozen at the top level so consumers cannot accidentally reassign a
@@ -57,7 +55,6 @@ const EMPTY_STATE: ChatStreamState = Object.freeze({
   sessionId: null,
   lastEventSeq: 0,
   active: false,
-  preview: null,
 });
 
 interface StreamingStateContextValue {
@@ -91,7 +88,6 @@ interface StreamingStateContextValue {
     status: PermissionRequest['status'],
   ) => void;
   bumpSeq: (chatId: string, seq: number) => void;
-  setPreview: (chatId: string, preview: PreviewState) => void;
   /** Stream finished — leave content visible briefly for the consumer to fold into history, then call clear. */
   end: (chatId: string) => void;
   /** Drop all streaming state for a chat (e.g. after assistant message persisted). */
@@ -131,7 +127,6 @@ export function StreamingStateProvider({ children }: { children: ReactNode }) {
         sessionId: null,
         lastEventSeq: 0,
         active: true,
-        preview: null,
       }));
     },
     [update],
@@ -204,13 +199,6 @@ export function StreamingStateProvider({ children }: { children: ReactNode }) {
     [update],
   );
 
-  const setPreview = useCallback(
-    (chatId: string, preview: PreviewState) => {
-      update(chatId, (s) => ({ ...s, preview }));
-    },
-    [update],
-  );
-
   const end = useCallback(
     (chatId: string) => {
       // No-op when the slice has already been cleared. Without this guard,
@@ -251,7 +239,6 @@ export function StreamingStateProvider({ children }: { children: ReactNode }) {
       addPermission,
       updatePermission,
       bumpSeq,
-      setPreview,
       end,
       clear,
     }),
@@ -265,7 +252,6 @@ export function StreamingStateProvider({ children }: { children: ReactNode }) {
       addPermission,
       updatePermission,
       bumpSeq,
-      setPreview,
       end,
       clear,
     ],
