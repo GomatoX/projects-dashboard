@@ -26,19 +26,36 @@ export function mergePreviewItem(
   event: PreviewEvent,
   now: number,
 ): PreviewState {
+  // Normalize: empty string and undefined are both "untitled" — they share
+  // the single untitled slot and the rail's `title ?? "Untitled …"` fallback
+  // would otherwise render an empty tooltip for `""`.
+  const eventTitle = event.title?.trim() || undefined;
+
   const existingIdx = state.items.findIndex((it) =>
-    event.title ? it.title === event.title : !it.title,
+    eventTitle ? it.title === eventTitle : !it.title,
   );
 
   if (existingIdx >= 0) {
     const existing = state.items[existingIdx];
+    // Identity short-circuit: if nothing user-visible changed, return the
+    // same state object so callers (writePreview) and React keys (`${id}:${updatedAt}`)
+    // don't trigger a re-render or remount the renderer (Mermaid in particular
+    // re-runs layout on every remount).
+    if (
+      existing.content === event.content &&
+      existing.contentType === event.contentType &&
+      existing.title === eventTitle &&
+      state.activeId === existing.id
+    ) {
+      return state;
+    }
     const updated: PreviewItem = {
       // Keep id + createdAt so the rail icon stays stable across iterations.
       id: existing.id,
       createdAt: existing.createdAt,
       contentType: event.contentType,
       content: event.content,
-      title: event.title,
+      title: eventTitle,
       updatedAt: now,
     };
     const items = state.items.slice();
@@ -50,7 +67,7 @@ export function mergePreviewItem(
     id: event.id,
     contentType: event.contentType,
     content: event.content,
-    title: event.title,
+    title: eventTitle,
     createdAt: now,
     updatedAt: now,
   };

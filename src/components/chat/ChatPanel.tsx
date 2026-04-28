@@ -156,10 +156,16 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
     key: 'chat:previewSplitPercent',
     defaultValue: 50,
   });
-  const splitPercent = Math.min(80, Math.max(20, splitPercentRaw));
+  // Defensive: if localStorage holds a corrupted/non-finite value, fall back
+  // to 50 instead of letting NaN propagate into `flexBasis: NaN%`.
+  const splitPercent = Math.min(
+    80,
+    Math.max(20, Number.isFinite(splitPercentRaw) ? splitPercentRaw : 50),
+  );
   const setSplitPercent = useCallback(
     (next: number) => {
-      setSplitPercentRaw(Math.min(80, Math.max(20, next)));
+      const safe = Number.isFinite(next) ? next : 50;
+      setSplitPercentRaw(Math.min(80, Math.max(20, safe)));
     },
     [setSplitPercentRaw],
   );
@@ -1013,7 +1019,6 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
 
   return (
     <Box
-      ref={containerRef}
       style={{
         display: 'flex',
         height: '100%',
@@ -1152,6 +1157,20 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
         </ScrollArea>
       </Box>
 
+      {/* Chat-area + preview-dock row. The ref here is the 100% reference
+          for ResizeHandle so the resize percentage tracks the chat/preview
+          split, not the whole page (sidebar excluded). */}
+      <Box
+        ref={containerRef}
+        style={{
+          flex: 1,
+          minWidth: 0,
+          display: 'flex',
+          height: '100%',
+          minHeight: 0,
+          overflow: 'hidden',
+        }}
+      >
       {/* Chat Area */}
       <Box
         style={{
@@ -1484,6 +1503,7 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
           onTogglePanel={() => setPreviewOpen((o) => !o)}
         />
       )}
+      </Box>
     </Box>
   );
 }

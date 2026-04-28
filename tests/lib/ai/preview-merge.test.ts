@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import {
   mergePreviewItem,
   removePreviewItem,
-} from '../../../src/lib/ai/preview-merge.ts';
+} from '../../../src/lib/ai/preview-merge';
 import {
   EMPTY_PREVIEW_STATE,
   type PreviewEvent,
-} from '../../../src/lib/ai/preview-types.ts';
+} from '../../../src/lib/ai/preview-types';
 
 const ev = (overrides: Partial<PreviewEvent>): PreviewEvent => ({
   type: 'preview',
