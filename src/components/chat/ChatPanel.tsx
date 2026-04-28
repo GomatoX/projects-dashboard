@@ -52,7 +52,7 @@ import {
   type PreviewState,
 } from '@/lib/ai/preview-types';
 import { extractAllPreviews } from '@/lib/ai/preview-detector';
-import { mergePreviewItem, removePreviewItem } from '@/lib/ai/preview-merge';
+import { mergePreviewItem } from '@/lib/ai/preview-merge';
 import { useLocalStorage } from '@mantine/hooks';
 
 interface Chat {
@@ -187,19 +187,22 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
     [],
   );
 
-  // Re-open the preview panel (collapsed) when switching to a chat that has any items
+  // When switching chats, leave the panel closed by default — the rail still
+  // shows the available previews so the user can click in if they want. Live
+  // preview events (mid-stream) will auto-open the panel themselves; there's
+  // no reason to force-open just because we navigated.
   useEffect(() => {
     if (!activeChat) return;
-    const saved = lastPreviewsRef.current.get(activeChat);
-    if (saved && saved.items.length > 0) {
-      setPreviewOpen(true);
-    } else {
-      setPreviewOpen(false);
-    }
+    setPreviewOpen(false);
     setPreviewExpanded(false);
   }, [activeChat]);
 
   const containerRef = useRef<HTMLDivElement>(null);
+  // True only while the user is actively dragging the resize handle. Used to
+  // disable the preview panel's flex-basis transition during drag — otherwise
+  // every mousemove triggers a fresh 200ms animation and the handle "wobbles"
+  // behind the cursor.
+  const [isResizing, setIsResizing] = useState(false);
 
   const streaming = useStreamingState();
   // Read the current streaming state slice for the active chat once per render.
@@ -276,9 +279,9 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
           if (restored.items.length > 0) {
             lastPreviewsRef.current.set(chatId, restored);
             setPreviewRevision((r) => r + 1);
-            if (activeChatRef.current === chatId) {
-              setPreviewOpen(true);
-            }
+            // Don't auto-open on history restore — the rail icons make the
+            // previews discoverable, and forcing the panel open after every
+            // reload is intrusive when the user just wants to read the chat.
           }
         }
       } catch {
@@ -1157,9 +1160,21 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
         </ScrollArea>
       </Box>
 
-      {/* Chat-area + preview-dock row. The ref here is the 100% reference
-          for ResizeHandle so the resize percentage tracks the chat/preview
-          split, not the whole page (sidebar excluded). */}
+      {/* Chat-area + preview-dock row. The OUTER box holds the rail too so
+          it stays anchored to the right edge. The INNER box (containerRef)
+          is the 100% reference for the resize math — it must contain ONLY
+          the resizable children (chat, handle, panel). The rail is fixed-
+          width and lives outside. */}
+      <Box
+        style={{
+          flex: 1,
+          minWidth: 0,
+          display: 'flex',
+          height: '100%',
+          minHeight: 0,
+          overflow: 'hidden',
+        }}
+      >
       <Box
         ref={containerRef}
         style={{
@@ -1456,6 +1471,8 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
           <ResizeHandle
             onResize={setSplitPercent}
             containerRef={containerRef}
+            onDragStart={() => setIsResizing(true)}
+            onDragEnd={() => setIsResizing(false)}
           />
           <Box
             style={{
@@ -1469,7 +1486,12 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
               minHeight: 0,
               borderLeft: '1px solid var(--mantine-color-dark-6)',
               background: 'var(--mantine-color-dark-7)',
-              transition: 'flex-basis 200ms cubic-bezier(0.4, 0, 0.2, 1)',
+              // Disable easing while the user is actively dragging — otherwise
+              // each mousemove kicks off a new 200ms animation and the handle
+              // visibly lags / wobbles behind the cursor.
+              transition: isResizing
+                ? 'none'
+                : 'flex-basis 200ms cubic-bezier(0.4, 0, 0.2, 1)',
               overflow: 'hidden',
             }}
           >
@@ -1483,6 +1505,7 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
           </Box>
         </>
       )}
+      </Box>
       {hasItems && activeChat && (
         <PreviewRail
           items={previewState.items}
@@ -1491,14 +1514,6 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
           onSelect={(id) => {
             writePreview(activeChat, (prev) => ({ ...prev, activeId: id }));
             setPreviewOpen(true);
-          }}
-          onCloseItem={(id) => {
-            writePreview(activeChat, (prev) => removePreviewItem(prev, id));
-            // Close the panel if the rail is now empty.
-            const after = lastPreviewsRef.current.get(activeChat);
-            if (!after || after.items.length === 0) {
-              setPreviewOpen(false);
-            }
           }}
           onTogglePanel={() => setPreviewOpen((o) => !o)}
         />
