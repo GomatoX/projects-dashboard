@@ -217,6 +217,53 @@ export function buildBrowserTools(deps: ToolDeps) {
         }
       },
     ),
+
+    tool(
+      'browser_save_state',
+      'Save the current browser context (cookies + localStorage) to disk on the agent host, keyed by this chat. Useful before the 10-min idle window evicts the context — re-load with browser_load_state.',
+      {},
+      async () => {
+        try {
+          const { saveStorageState } = await import('./state-store.js');
+          const { peek } = await import('./context-pool.js');
+          const pooled = peek(chatId);
+          if (!pooled) return err('No active browser context to save.');
+          const state = await pooled.ctx.storageState();
+          const path = await saveStorageState(chatId, state);
+          touch(chatId);
+          return ok(`Saved browser state to ${path}`);
+        } catch (e) {
+          return err(`Save failed: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      },
+    ),
+
+    tool(
+      'browser_load_state',
+      'Load a previously saved browser state for this chat into the current context. Recreates the context if needed. NOTE: pages are NOT restored — only cookies/localStorage. Navigate after loading.',
+      {},
+      async () => {
+        try {
+          const { loadStorageState } = await import('./state-store.js');
+          const state = await loadStorageState(chatId);
+          if (!state) return err('No saved state for this chat.');
+
+          // Tear down the existing context and rebuild with storageState.
+          // We can't update an existing BrowserContext's storage in-place.
+          const { closeContext, getOrCreateContext } = await import('./context-pool.js');
+          await closeContext(chatId, 'explicit');
+          // Re-open with storage loaded. We need an internal hook for this —
+          // see Task 4.2's pool extension.
+          const { _internal } = await import('./context-pool.js');
+          _internal.preloadStateForNext(chatId, state);
+          await getOrCreateContext(chatId, sessionId);
+          touch(chatId);
+          return ok('Loaded saved state into a fresh context.');
+        } catch (e) {
+          return err(`Load failed: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      },
+    ),
   ];
 }
 

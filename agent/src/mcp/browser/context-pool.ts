@@ -22,6 +22,7 @@ interface PooledContext {
 let browser: Browser | null = null;
 let browserStarting: Promise<Browser> | null = null;
 const contexts = new Map<string, PooledContext>();
+const preloadedStates = new Map<string, unknown>();
 /**
  * In-flight create promises keyed by chatId. Prevents the TOCTOU race where
  * two concurrent `getOrCreateContext` calls for the same chat both pass the
@@ -120,7 +121,12 @@ export async function getOrCreateContext(
     }
 
     const b = await ensureBrowser();
-    const ctx = await b.newContext({ viewport: VIEWPORT });
+    const preloaded = preloadedStates.get(chatId);
+    preloadedStates.delete(chatId);
+    const ctx = await b.newContext({
+      viewport: VIEWPORT,
+      ...(preloaded ? { storageState: preloaded as import('playwright').BrowserContextOptions['storageState'] } : {}),
+    });
     const page = await ctx.newPage();
     const now = Date.now();
     const pooled: PooledContext = {
@@ -263,4 +269,7 @@ function ensureIdleTimer(): void {
  */
 export const _internal = {
   contexts,
+  preloadStateForNext(chatId: string, state: unknown): void {
+    preloadedStates.set(chatId, state);
+  },
 };
