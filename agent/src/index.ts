@@ -53,7 +53,7 @@ import type { AgentCommand, AgentEvent } from '../../src/lib/socket/types.js';
 // confirm the device is running the build that includes a given fix
 // (e.g. v0.2.0 = chat attachments are downloaded over HTTP instead of
 // surviving as `__ATTACHMENT_<index>__` placeholders).
-console.log('🔧 Dev Dashboard Agent v0.2.0 (attachments-over-http)');
+console.log('🔧 Dev Dashboard Agent v0.3.0 (mcp-plumbing)');
 console.log('─'.repeat(40));
 
 const config = loadConfig();
@@ -310,6 +310,8 @@ const { socket } = createConnection(config, {
           maxTurns: command.maxTurns,
           claudePath: command.claudePath,
           permissions: command.permissions,
+          pm2Name: command.pm2Name,           // NEW
+          enableBrowserMcp: command.enableBrowserMcp, // NEW
           // Attachment plumbing — the dashboard URL / agent token are
           // *not* on the command (they're agent-side config), so we
           // bolt them on here. The handler downloads the bytes from

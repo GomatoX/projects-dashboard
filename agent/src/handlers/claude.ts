@@ -113,6 +113,10 @@ interface RunClaudeArgs {
   maxTurns?: number;
   claudePath?: string;
   permissions: ClaudePermissionConfig;
+  /** When set, mount the PM2 MCP scoped to this pm2Name. */
+  pm2Name?: string;
+  /** When true and Playwright is installed, mount the Browser MCP. */
+  enableBrowserMcp?: boolean;
   // ─── Attachments (optional) ────────────────────────────
   // Present iff the user attached files to this turn. The dashboard
   // hosts the bytes; we download them via HTTP before invoking the SDK.
@@ -140,12 +144,18 @@ export async function runClaudeQuery(args: RunClaudeArgs): Promise<void> {
     maxTurns,
     claudePath,
     permissions,
+    pm2Name,        // NEW — unused in Phase 0
+    enableBrowserMcp, // NEW — unused in Phase 0
     attachments,
     chatId,
     projectId,
     dashboardUrl,
     agentToken,
   } = args;
+
+  // Touched in Phase 1/2 — keep referenced so lint doesn't complain.
+  void pm2Name;
+  void enableBrowserMcp;
 
   const emit = (event: AgentEvent) => socket.emit('event', event);
 
