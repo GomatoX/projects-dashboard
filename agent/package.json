@@ -17,7 +17,8 @@
     "pm2": "^6.0.14",
     "simple-git": "^3.28.0",
     "socket.io-client": "^4.8.3",
-    "systeminformation": "^5.25.11"
+    "systeminformation": "^5.25.11",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/node": "^22",
