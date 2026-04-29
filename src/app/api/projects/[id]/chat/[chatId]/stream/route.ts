@@ -847,9 +847,23 @@ function handleRemoteStream(args: RemoteStreamArgs) {
       // ─── Listen for agent events filtered by sessionId ──
       const previewDetector = new PreviewDetector();
       const onEvent = async (event: Record<string, unknown>) => {
-        if (event.sessionId !== sessionId) return;
-
         const type = event.type as string;
+
+        // Browser events are scoped to chatId, not sessionId. The browser
+        // context persists across SDK sessions (one context per chat, reused
+        // until idle/evicted), so screencast frames keep emitting with the
+        // sessionId of whichever query first opened the context — not the
+        // current one. Filter these by chatId instead, otherwise every query
+        // after the first would see its frames dropped.
+        if (
+          type === 'BROWSER_FRAME' ||
+          type === 'BROWSER_CONTEXT_OPENED' ||
+          type === 'BROWSER_CONTEXT_CLOSED'
+        ) {
+          if (event.chatId !== chatId) return;
+        } else {
+          if (event.sessionId !== sessionId) return;
+        }
 
         switch (type) {
           case 'CLAUDE_TEXT': {
