@@ -103,7 +103,44 @@ export function createPm2McpServer(pm2Name: string): McpSdkServerConfigWithInsta
             .describe('Number of recent lines to return (1-500, default 100).'),
         },
         async ({ lines }) => {
+          // Pre-flight: confirm the process exists. handlePM2Logs swallows
+          // exec failures into a synthetic PM2_LOGS_RESULT (`logs: 'Failed
+          // to get logs'` etc.) — without this check, the model would see
+          // those error sentinels as if they were real log content.
+          // handlePM2List, in contrast, does return COMMAND_ERROR cleanly.
+          const listEvt = await handlePM2List(`mcp-${Date.now()}`);
+          if (listEvt.type === 'COMMAND_ERROR') {
+            return {
+              content: [
+                { type: 'text' as const, text: `PM2 error: ${listEvt.message}` },
+              ],
+              isError: true,
+            };
+          }
+          if (listEvt.type !== 'PM2_LIST_RESULT') {
+            return {
+              content: [
+                { type: 'text' as const, text: 'Unexpected PM2 response' },
+              ],
+              isError: true,
+            };
+          }
+          if (!listEvt.processes.some((p) => p.name === pm2Name)) {
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text: `Process "${pm2Name}" is not registered with PM2 on this device — no logs to read.`,
+                },
+              ],
+              isError: false,
+            };
+          }
+
           const evt = await handlePM2Logs(`mcp-${Date.now()}`, pm2Name, lines);
+          // Defensive: handlePM2Logs currently never returns COMMAND_ERROR
+          // (it folds failures into PM2_LOGS_RESULT with stderr content).
+          // Kept here in case that contract tightens later.
           if (evt.type === 'COMMAND_ERROR') {
             return {
               content: [
