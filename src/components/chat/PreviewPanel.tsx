@@ -29,6 +29,7 @@ const CONTENT_TYPE_LABELS: Record<string, string> = {
   mermaid: 'Diagram',
   svg: 'SVG',
   diff: 'Diff',
+  browser: 'Browser',
 };
 
 export function PreviewPanel({
