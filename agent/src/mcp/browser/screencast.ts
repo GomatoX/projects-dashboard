@@ -45,7 +45,11 @@ export async function attachScreencast(args: {
       height: params.metadata.deviceHeight ?? Math.round((MAX_WIDTH * 3) / 4),
       url: page.url(),
     };
-    socket.emit('event', evt);
+    // Skip when the dashboard isn't connected — socket.io would otherwise
+    // buffer 5–10 frames/sec × ~50KB into sendBuffer and bloat memory.
+    if (socket.connected) {
+      socket.emit('event', evt);
+    }
     // CDP requires per-frame ack to keep the stream flowing.
     try {
       await session.send('Page.screencastFrameAck', { sessionId: params.sessionId });
@@ -55,12 +59,23 @@ export async function attachScreencast(args: {
   };
 
   // CDPSession is an EventEmitter at runtime even though the .d.ts is fussy.
-  (session as unknown as { on(ev: string, fn: (p: unknown) => void): void }).on(
-    'Page.screencastFrame',
-    handler as unknown as (p: unknown) => void,
-  );
+  // Capture the typed view once so teardown can `.off()` the same handler.
+  const emitter = session as unknown as {
+    on(ev: string, fn: (p: unknown) => void): void;
+    off(ev: string, fn: (p: unknown) => void): void;
+  };
+  const erasedHandler = handler as unknown as (p: unknown) => void;
+  emitter.on('Page.screencastFrame', erasedHandler);
 
   return async () => {
+    // Remove the listener FIRST — frames buffered in the channel between
+    // stopScreencast and detach() would otherwise still fire the handler
+    // and keep `page` / `socket` alive in the closure.
+    try {
+      emitter.off('Page.screencastFrame', erasedHandler);
+    } catch {
+      // best-effort
+    }
     try {
       await session.send('Page.stopScreencast');
     } catch {

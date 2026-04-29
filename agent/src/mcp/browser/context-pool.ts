@@ -131,10 +131,11 @@ export async function getOrCreateContext(
       lastUsedSeq: ++lastUsedSeqCounter,
       teardowns: [],
     };
-    contexts.set(chatId, pooled);
 
-    // Attach the live screencast. Stored as a teardown so closeContext()
-    // also stops the stream cleanly.
+    // Attach the live screencast BEFORE publishing the pooled object via
+    // contexts.set — otherwise an idle/eviction call to closeContext()
+    // landing here could race past the teardown push and orphan the CDP
+    // session.
     if (agentSocket) {
       const { attachScreencast } = await import('./screencast.js');
       const detach = await attachScreencast({
@@ -146,6 +147,8 @@ export async function getOrCreateContext(
       });
       pooled.teardowns.push(detach);
     }
+
+    contexts.set(chatId, pooled);
 
     emit({
       type: 'BROWSER_CONTEXT_OPENED',
