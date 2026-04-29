@@ -1555,6 +1555,7 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
             <PreviewPanel
               key={`${activeItem.id}:${previewRevision}`}
               item={activeItem}
+              chatId={activeChat!}
               isExpanded={previewExpanded}
               onClosePanel={() => setPreviewOpen(false)}
               onToggleExpand={() => setPreviewExpanded((e) => !e)}

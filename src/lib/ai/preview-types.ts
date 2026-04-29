@@ -1,5 +1,5 @@
 // src/lib/ai/preview-types.ts
-export type PreviewContentType = 'html' | 'markdown' | 'mermaid' | 'svg' | 'diff';
+export type PreviewContentType = 'html' | 'markdown' | 'mermaid' | 'svg' | 'diff' | 'browser';
 
 /** Shape of the `preview` SSE event written to the journal. */
 export interface PreviewEvent {

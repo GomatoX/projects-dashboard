@@ -3,6 +3,7 @@
 import { Box, Stack, Tooltip } from '@mantine/core';
 import {
   IconBrandHtml5,
+  IconBrowser,
   IconChartDots3,
   IconFileText,
   IconGitCompare,
@@ -31,6 +32,7 @@ const ICONS: Record<PreviewContentType, ComponentType<IconProps>> = {
   mermaid: IconChartDots3,
   svg: IconPhoto,
   diff: IconGitCompare,
+  browser: IconBrowser,
 };
 
 const TYPE_LABEL: Record<PreviewContentType, string> = {
@@ -39,6 +41,7 @@ const TYPE_LABEL: Record<PreviewContentType, string> = {
   mermaid: 'Diagram',
   svg: 'SVG',
   diff: 'Diff',
+  browser: 'Browser',
 };
 
 export function PreviewRail({

@@ -7,6 +7,7 @@ import {
   IconX,
 } from '@tabler/icons-react';
 import { type PreviewItem } from '@/lib/ai/preview-types';
+import { BrowserPreview } from './preview/BrowserPreview';
 import { DiffPreview } from './preview/DiffPreview';
 import { HtmlPreview } from './preview/HtmlPreview';
 import { MarkdownPreview } from './preview/MarkdownPreview';
@@ -15,6 +16,7 @@ import { SvgPreview } from './preview/SvgPreview';
 
 interface PreviewPanelProps {
   item: PreviewItem;
+  chatId: string;
   isExpanded: boolean;
   /** Close the entire panel (rail stays visible if items.length > 0). */
   onClosePanel: () => void;
@@ -31,6 +33,7 @@ const CONTENT_TYPE_LABELS: Record<string, string> = {
 
 export function PreviewPanel({
   item,
+  chatId,
   isExpanded,
   onClosePanel,
   onToggleExpand,
@@ -131,6 +134,7 @@ export function PreviewPanel({
         )}
         {item.contentType === 'svg' && <SvgPreview content={item.content} />}
         {item.contentType === 'diff' && <DiffPreview content={item.content} />}
+        {item.contentType === 'browser' && <BrowserPreview chatId={chatId} />}
       </Box>
     </Box>
   );
