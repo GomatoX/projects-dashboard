@@ -99,6 +99,14 @@ export async function getOrCreateContext(
 
   const existing = contexts.get(chatId);
   if (existing) {
+    // Defensive: if a load_state preloaded a state for this chat but we're
+    // returning a pre-existing context, the preload would otherwise sit
+    // around and silently get applied to a future, unrelated create. Drop it.
+    if (preloadedStates.delete(chatId)) {
+      console.warn(
+        `[browser-pool] preloaded state for chat ${chatId} discarded — context already existed`,
+      );
+    }
     touch(chatId);
     return existing;
   }
@@ -261,6 +269,20 @@ function ensureIdleTimer(): void {
   idleTimer.unref?.();
 }
 
+/**
+ * Stash a Playwright `storageState` to be applied to the NEXT context created
+ * for `chatId`. One-shot: consumed (deleted) on the next `getOrCreateContext`
+ * call for that chat — including the early-return paths, which discard with
+ * a warning rather than letting the preload leak to a later, unrelated create.
+ *
+ * Used by `browser_load_state`. Pair with `closeContext(chatId, 'explicit')`
+ * to guarantee a fresh context will actually consume it (Playwright cannot
+ * merge storage into an existing context in-place).
+ */
+export function preloadStateForNext(chatId: string, state: unknown): void {
+  preloadedStates.set(chatId, state);
+}
+
 // ─── Test seam ─────────────────────────────────────────────
 /**
  * Internal — exposed only for the smoke script. Read-only intent:
@@ -269,7 +291,4 @@ function ensureIdleTimer(): void {
  */
 export const _internal = {
   contexts,
-  preloadStateForNext(chatId: string, state: unknown): void {
-    preloadedStates.set(chatId, state);
-  },
 };

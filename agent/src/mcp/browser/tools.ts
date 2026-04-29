@@ -249,13 +249,14 @@ export function buildBrowserTools(deps: ToolDeps) {
           if (!state) return err('No saved state for this chat.');
 
           // Tear down the existing context and rebuild with storageState.
-          // We can't update an existing BrowserContext's storage in-place.
-          const { closeContext, getOrCreateContext } = await import('./context-pool.js');
+          // Playwright cannot merge storage into an existing BrowserContext
+          // in-place, so we close, stash the state for the next create via
+          // preloadStateForNext, and immediately recreate.
+          const { closeContext, getOrCreateContext, preloadStateForNext } = await import(
+            './context-pool.js'
+          );
           await closeContext(chatId, 'explicit');
-          // Re-open with storage loaded. We need an internal hook for this —
-          // see Task 4.2's pool extension.
-          const { _internal } = await import('./context-pool.js');
-          _internal.preloadStateForNext(chatId, state);
+          preloadStateForNext(chatId, state);
           await getOrCreateContext(chatId, sessionId);
           touch(chatId);
           return ok('Loaded saved state into a fresh context.');

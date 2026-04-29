@@ -1,4 +1,9 @@
 // agent/src/mcp/browser/state-store.ts
+//
+// Persists Playwright BrowserContext.storageState() to disk so chats can survive
+// the 10-min idle eviction window with their cookies + localStorage intact.
+// Files contain auth tokens / session cookies — written with mode 0600 inside
+// a 0700 directory so other local users can't read them.
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -12,7 +17,7 @@ function pathFor(chatId: string): string {
 }
 
 export async function ensureDir(): Promise<void> {
-  await mkdir(DIR, { recursive: true });
+  await mkdir(DIR, { recursive: true, mode: 0o700 });
 }
 
 /** Persist a Playwright storageState() result, keyed by chatId. */
@@ -22,7 +27,7 @@ export async function saveStorageState(
 ): Promise<string> {
   await ensureDir();
   const p = pathFor(chatId);
-  await writeFile(p, JSON.stringify(state), 'utf-8');
+  await writeFile(p, JSON.stringify(state), { encoding: 'utf-8', mode: 0o600 });
   return p;
 }
 
