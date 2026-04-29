@@ -86,6 +86,20 @@ export async function buildAgentHello(
     // No PM2
   }
 
+  // Check for Playwright + Chromium. We require BOTH the package and
+  // the binary to be present — the binary lives outside node_modules
+  // and the install isn't done by `pnpm install` alone.
+  try {
+    const pw = await import('playwright');
+    // launchablePath() throws if the binary is missing; check the path exists.
+    const path = pw.chromium.executablePath();
+    const { access } = await import('node:fs/promises');
+    await access(path);
+    capabilities.push('playwright');
+  } catch {
+    // Playwright not available — Browser MCP will be skipped silently.
+  }
+
   // Check for Docker
   try {
     const { execFile } = await import('node:child_process');
@@ -98,6 +112,8 @@ export async function buildAgentHello(
   }
 
   capabilities.push('node');
+
+  console.log('📦 Capabilities:', capabilities.join(', '));
 
   return {
     type: 'AGENT_HELLO',
