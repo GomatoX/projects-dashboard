@@ -13,6 +13,8 @@ interface PooledContext {
   page: Page;
   /** Most recent tool-call wallclock ms — used for LRU + idle eviction. */
   lastUsed: number;
+  /** Monotonic per-pool sequence; tiebreaker for LRU when ms timestamps collide. */
+  lastUsedSeq: number;
   /** Set of teardown fns (e.g. screencast detacher). Run in close(). */
   teardowns: Array<() => Promise<void> | void>;
 }
@@ -20,8 +22,17 @@ interface PooledContext {
 let browser: Browser | null = null;
 let browserStarting: Promise<Browser> | null = null;
 const contexts = new Map<string, PooledContext>();
+/**
+ * In-flight create promises keyed by chatId. Prevents the TOCTOU race where
+ * two concurrent `getOrCreateContext` calls for the same chat both pass the
+ * "does it exist?" check and create two BrowserContexts (leaking the first).
+ */
+const pendingCreates = new Map<string, Promise<PooledContext>>();
 let idleTimer: NodeJS.Timeout | null = null;
 let agentSocket: Socket | null = null;
+let shuttingDown = false;
+/** Monotonic counter so `lastUsedSeq` is always strictly increasing per pool. */
+let lastUsedSeqCounter = 0;
 
 /** Wire the pool to the agent socket so close events emit BROWSER_CONTEXT_CLOSED. */
 export function setAgentSocket(socket: Socket): void {
@@ -45,8 +56,19 @@ async function ensureBrowser(): Promise<Browser> {
     b.on('disconnected', () => {
       browser = null;
       // Drop all contexts — they're unusable once the browser is gone.
-      for (const [id] of contexts) {
-        contexts.delete(id);
+      // We can't await ctx.close() (the browser is gone), but we still
+      // emit BROWSER_CONTEXT_CLOSED so subscribers don't see ghosts.
+      const orphans = [...contexts.keys()];
+      contexts.clear();
+      pendingCreates.clear();
+      if (orphans.length > 0) {
+        console.warn(
+          `[browser-pool] Chromium disconnected; dropping ${orphans.length} context(s):`,
+          orphans.join(', '),
+        );
+      }
+      for (const id of orphans) {
+        emit({ type: 'BROWSER_CONTEXT_CLOSED', chatId: id, reason: 'shutdown' });
       }
     });
     browser = b;
@@ -70,47 +92,73 @@ export async function getOrCreateContext(
   chatId: string,
   sessionId: string,
 ): Promise<PooledContext> {
+  if (shuttingDown) {
+    throw new Error('browser pool is shutting down');
+  }
+
   const existing = contexts.get(chatId);
   if (existing) {
-    existing.lastUsed = Date.now();
+    touch(chatId);
     return existing;
   }
 
-  // LRU evict if at cap.
-  if (contexts.size >= MAX_CONTEXTS) {
-    const oldest = [...contexts.values()].sort((a, b) => a.lastUsed - b.lastUsed)[0];
-    if (oldest) {
-      await closeContext(oldest.chatId, 'evicted');
+  // Coalesce concurrent creates for the same chatId so we don't leak
+  // a duplicate BrowserContext when two SDK tool calls race.
+  const inFlight = pendingCreates.get(chatId);
+  if (inFlight) return inFlight;
+
+  const promise = (async () => {
+    // LRU evict if at cap. Sort by lastUsed (primary) and lastUsedSeq
+    // (tiebreaker for ms-collisions under heavy load).
+    if (contexts.size >= MAX_CONTEXTS) {
+      const oldest = [...contexts.values()].sort(
+        (a, b) => a.lastUsed - b.lastUsed || a.lastUsedSeq - b.lastUsedSeq,
+      )[0];
+      if (oldest) {
+        await closeContext(oldest.chatId, 'evicted');
+      }
     }
+
+    const b = await ensureBrowser();
+    const ctx = await b.newContext({ viewport: VIEWPORT });
+    const page = await ctx.newPage();
+    const now = Date.now();
+    const pooled: PooledContext = {
+      chatId,
+      ctx,
+      page,
+      lastUsed: now,
+      lastUsedSeq: ++lastUsedSeqCounter,
+      teardowns: [],
+    };
+    contexts.set(chatId, pooled);
+
+    emit({
+      type: 'BROWSER_CONTEXT_OPENED',
+      chatId,
+      sessionId,
+      url: page.url() || 'about:blank',
+    });
+
+    ensureIdleTimer();
+    return pooled;
+  })();
+
+  pendingCreates.set(chatId, promise);
+  try {
+    return await promise;
+  } finally {
+    pendingCreates.delete(chatId);
   }
-
-  const b = await ensureBrowser();
-  const ctx = await b.newContext({ viewport: VIEWPORT });
-  const page = await ctx.newPage();
-  const pooled: PooledContext = {
-    chatId,
-    ctx,
-    page,
-    lastUsed: Date.now(),
-    teardowns: [],
-  };
-  contexts.set(chatId, pooled);
-
-  emit({
-    type: 'BROWSER_CONTEXT_OPENED',
-    chatId,
-    sessionId,
-    url: page.url() || 'about:blank',
-  });
-
-  ensureIdleTimer();
-  return pooled;
 }
 
 /** Mark the context as just-used. Tools call this after every action. */
 export function touch(chatId: string): void {
   const ctx = contexts.get(chatId);
-  if (ctx) ctx.lastUsed = Date.now();
+  if (ctx) {
+    ctx.lastUsed = Date.now();
+    ctx.lastUsedSeq = ++lastUsedSeqCounter;
+  }
 }
 
 /** Look up without creating. Used for idle sweep + diagnostics. */
@@ -133,20 +181,25 @@ export async function closeContext(
   for (const fn of pooled.teardowns) {
     try {
       await fn();
-    } catch {
-      // best-effort
+    } catch (err) {
+      console.warn(`[browser-pool] teardown failed for ${chatId}:`, err);
     }
   }
   try {
     await pooled.ctx.close();
-  } catch {
-    // best-effort
+  } catch (err) {
+    console.warn(`[browser-pool] context.close() failed for ${chatId}:`, err);
   }
   emit({ type: 'BROWSER_CONTEXT_CLOSED', chatId, reason });
 }
 
 /** Close everything. Called on agent SIGTERM. */
 export async function closeAll(): Promise<void> {
+  shuttingDown = true;
+  // Drain any in-flight creates first so they can't slip a context past us.
+  if (pendingCreates.size > 0) {
+    await Promise.allSettled([...pendingCreates.values()]);
+  }
   for (const id of [...contexts.keys()]) {
     await closeContext(id, 'shutdown');
   }
@@ -157,8 +210,8 @@ export async function closeAll(): Promise<void> {
   if (browser) {
     try {
       await browser.close();
-    } catch {
-      // best-effort
+    } catch (err) {
+      console.warn('[browser-pool] browser.close() failed:', err);
     }
     browser = null;
   }
@@ -185,14 +238,10 @@ function ensureIdleTimer(): void {
 
 // ─── Test seam ─────────────────────────────────────────────
 /**
- * Internal — used by the smoke script to inject fake clock & cap.
- * Production code should never call these.
+ * Internal — exposed only for the smoke script. Read-only intent:
+ * mutating `contexts` directly will corrupt pool invariants (no
+ * BROWSER_CONTEXT_OPENED/CLOSED emit, no LRU bookkeeping).
  */
 export const _internal = {
-  setMaxContexts(_n: number) {
-    // Compile-time constant in production; the smoke test uses
-    // contexts directly via the public API. Stub kept for symmetry.
-    void _n;
-  },
   contexts,
 };
