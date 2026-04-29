@@ -1091,16 +1091,15 @@ function handleRemoteStream(args: RemoteStreamArgs) {
         // actually mount it based on local capability detection.
         ...(project.pm2Name ? { pm2Name: project.pm2Name } : {}),
         enableBrowserMcp: true,
-        // Only attach the metadata block when there's actually something to
-        // download — a 0-length array would make the agent log "fetching 0
-        // attachments" which is just noise.
-        ...(queryAttachments.length > 0
-          ? {
-              attachments: queryAttachments,
-              chatId,
-              projectId,
-            }
-          : {}),
+        // chatId / projectId are required by the Browser MCP for per-chat
+        // context isolation and event routing — send them unconditionally,
+        // not just when attachments are present.
+        chatId,
+        projectId,
+        // Only attach the attachments array when there's actually something
+        // to download — a 0-length array would make the agent log
+        // "fetching 0 attachments" which is just noise.
+        ...(queryAttachments.length > 0 ? { attachments: queryAttachments } : {}),
       };
       socket.emit('command', command);
 
