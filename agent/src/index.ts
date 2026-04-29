@@ -53,7 +53,7 @@ import type { AgentCommand, AgentEvent } from '../../src/lib/socket/types.js';
 // confirm the device is running the build that includes a given fix
 // (e.g. v0.2.0 = chat attachments are downloaded over HTTP instead of
 // surviving as `__ATTACHMENT_<index>__` placeholders).
-console.log('🔧 Dev Dashboard Agent v0.3.0 (mcp-plumbing)');
+console.log('🔧 Dev Dashboard Agent v0.3.1 (pm2-mcp)');
 console.log('─'.repeat(40));
 
 const config = loadConfig();

@@ -237,6 +237,7 @@ export async function runClaudeQuery(args: RunClaudeArgs): Promise<void> {
     const mcpServers: Record<string, McpServerConfig> = {};
     if (pm2Name) {
       mcpServers.pm2 = createPm2McpServer(pm2Name);
+      console.log(`[claude] mounted pm2 MCP for "${pm2Name}" (sessionId=${sessionId})`);
     }
     // (Browser MCP added in Phase 2.)
 
