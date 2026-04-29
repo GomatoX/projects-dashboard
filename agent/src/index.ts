@@ -46,6 +46,7 @@ import {
   cancelAllClaudeSessions,
   handleClaudePermissionResponse,
 } from './handlers/claude.js';
+import { setAgentSocket, closeAll as closeAllBrowser } from './mcp/browser/index.js';
 import type { AgentCommand, AgentEvent } from '../../src/lib/socket/types.js';
 
 // Bumped on every code change that touches the agent ↔ dashboard contract,
@@ -53,7 +54,7 @@ import type { AgentCommand, AgentEvent } from '../../src/lib/socket/types.js';
 // confirm the device is running the build that includes a given fix
 // (e.g. v0.2.0 = chat attachments are downloaded over HTTP instead of
 // surviving as `__ATTACHMENT_<index>__` placeholders).
-console.log('🔧 Dev Dashboard Agent v0.3.1 (pm2-mcp)');
+console.log('🔧 Dev Dashboard Agent v0.4.0 (pm2-mcp + browser-mcp)');
 console.log('─'.repeat(40));
 
 const config = loadConfig();
@@ -350,13 +351,16 @@ const { socket } = createConnection(config, {
   },
 });
 
+setAgentSocket(socket);
+
 // Graceful shutdown
-const shutdown = () => {
+const shutdown = async () => {
   console.log('\n🛑 Shutting down agent...');
   if (heartbeatTimer) clearInterval(heartbeatTimer);
   stopAllLogStreams();
   killAllTerminals();
   cancelAllClaudeSessions();
+  await closeAllBrowser();
   socket.disconnect();
   process.exit(0);
 };

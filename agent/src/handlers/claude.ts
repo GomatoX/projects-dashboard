@@ -25,6 +25,24 @@ import {
   rewritePromptPlaceholders,
 } from '../attachments.js';
 import { createPm2McpServer } from '../mcp/pm2.js';
+import { createBrowserMcpServer } from '../mcp/browser/index.js';
+
+// Probe once at module load. The capability check in discovery.ts is the
+// source of truth, but we don't want to import 'playwright' eagerly here
+// just to ask "is it there?" — so we cache the answer.
+let browserAvailable: boolean | null = null;
+async function isBrowserAvailable(): Promise<boolean> {
+  if (browserAvailable !== null) return browserAvailable;
+  try {
+    const pw = await import('playwright');
+    const { access } = await import('node:fs/promises');
+    await access(pw.chromium.executablePath());
+    browserAvailable = true;
+  } catch {
+    browserAvailable = false;
+  }
+  return browserAvailable;
+}
 
 // ─── In-flight Claude sessions ────────────────────────────
 //
@@ -155,9 +173,6 @@ export async function runClaudeQuery(args: RunClaudeArgs): Promise<void> {
     agentToken,
   } = args;
 
-  // Touched in Phase 2 — keep referenced so lint doesn't complain.
-  void enableBrowserMcp;
-
   const emit = (event: AgentEvent) => socket.emit('event', event);
 
   // Reject duplicate sessionIds — surfaces bugs in the dashboard rather
@@ -239,7 +254,10 @@ export async function runClaudeQuery(args: RunClaudeArgs): Promise<void> {
       mcpServers.pm2 = createPm2McpServer(pm2Name);
       console.log(`[claude] mounted pm2 MCP for "${pm2Name}" (sessionId=${sessionId})`);
     }
-    // (Browser MCP added in Phase 2.)
+    if (enableBrowserMcp && chatId && (await isBrowserAvailable())) {
+      mcpServers.browser = createBrowserMcpServer({ chatId, sessionId });
+      console.log(`[claude] mounted browser MCP (chatId=${chatId}, sessionId=${sessionId})`);
+    }
 
     const agentQuery = query({
       prompt: resolvedPrompt,
