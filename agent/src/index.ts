@@ -360,10 +360,20 @@ const shutdown = async () => {
   stopAllLogStreams();
   killAllTerminals();
   cancelAllClaudeSessions();
-  await closeAllBrowser();
+  try {
+    await closeAllBrowser();
+  } catch (err) {
+    // closeAllBrowser uses Promise.allSettled internally, so this should
+    // never fire — log defensively so a stray error never silently swallows
+    // process.exit.
+    console.warn('[shutdown] closeAllBrowser threw:', err);
+  }
   socket.disconnect();
   process.exit(0);
 };
 
-process.on('SIGTERM', shutdown);
-process.on('SIGINT', shutdown);
+// Wrap the async shutdown so signal handlers don't return an unhandled
+// promise to the runtime. Errors inside `shutdown` are caught by the
+// internal try/catch above; this `void` is just typing/intent.
+process.on('SIGTERM', () => void shutdown());
+process.on('SIGINT', () => void shutdown());

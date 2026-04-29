@@ -30,18 +30,24 @@ import { createBrowserMcpServer } from '../mcp/browser/index.js';
 // Probe once at module load. The capability check in discovery.ts is the
 // source of truth, but we don't want to import 'playwright' eagerly here
 // just to ask "is it there?" — so we cache the answer.
-let browserAvailable: boolean | null = null;
-async function isBrowserAvailable(): Promise<boolean> {
-  if (browserAvailable !== null) return browserAvailable;
-  try {
-    const pw = await import('playwright');
-    const { access } = await import('node:fs/promises');
-    await access(pw.chromium.executablePath());
-    browserAvailable = true;
-  } catch {
-    browserAvailable = false;
-  }
-  return browserAvailable;
+//
+// We cache the in-flight Promise (not the resolved boolean) so concurrent
+// CLAUDE_QUERYs racing through the first probe don't kick off duplicate
+// 'playwright' imports.
+let browserAvailablePromise: Promise<boolean> | null = null;
+function isBrowserAvailable(): Promise<boolean> {
+  if (browserAvailablePromise) return browserAvailablePromise;
+  browserAvailablePromise = (async () => {
+    try {
+      const pw = await import('playwright');
+      const { access } = await import('node:fs/promises');
+      await access(pw.chromium.executablePath());
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  return browserAvailablePromise;
 }
 
 // ─── In-flight Claude sessions ────────────────────────────

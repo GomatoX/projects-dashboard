@@ -200,9 +200,11 @@ export async function closeAll(): Promise<void> {
   if (pendingCreates.size > 0) {
     await Promise.allSettled([...pendingCreates.values()]);
   }
-  for (const id of [...contexts.keys()]) {
-    await closeContext(id, 'shutdown');
-  }
+  // Close contexts in parallel — sequential awaits would multiply Chromium
+  // round-trip latency by N on SIGTERM and risk hanging the daemon shutdown.
+  await Promise.allSettled(
+    [...contexts.keys()].map((id) => closeContext(id, 'shutdown')),
+  );
   if (idleTimer) {
     clearInterval(idleTimer);
     idleTimer = null;
