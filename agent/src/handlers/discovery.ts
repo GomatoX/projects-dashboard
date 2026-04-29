@@ -91,10 +91,10 @@ export async function buildAgentHello(
   // and the install isn't done by `pnpm install` alone.
   try {
     const pw = await import('playwright');
-    // launchablePath() throws if the binary is missing; check the path exists.
-    const path = pw.chromium.executablePath();
-    const { access } = await import('node:fs/promises');
-    await access(path);
+    // executablePath() returns the expected install path without checking
+    // existence; access() throws if the binary isn't there.
+    const chromiumPath = pw.chromium.executablePath();
+    await access(chromiumPath);
     capabilities.push('playwright');
   } catch {
     // Playwright not available — Browser MCP will be skipped silently.
