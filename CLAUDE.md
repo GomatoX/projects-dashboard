@@ -68,6 +68,14 @@ Streaming workloads (Claude SDK, terminal, PM2 logs) emit events directly via `s
 ### DB
 libsql + Drizzle. Schema split into `src/lib/db/schema.ts` (app) and `src/lib/db/auth-schema.ts` (better-auth). Both are listed in `drizzle.config.ts`. Use `pnpm db:push` after schema changes — there is no migration-file workflow checked in beyond what Drizzle generates in `./drizzle/`.
 
+### Per-chat MCPs (PM2, Browser)
+The agent's `runClaudeQuery` (`agent/src/handlers/claude.ts`) builds a per-call `mcpServers` map. Two in-process SDK MCPs:
+
+- **PM2 MCP** (`agent/src/mcp/pm2.ts`) — mounted iff the chat's project has `pm2Name` set; exposes `pm2_status` + `pm2_logs` for that one process. Read-only.
+- **Browser MCP** (`agent/src/mcp/browser/`) — mounted iff Chromium is installed (capability detection in `agent/src/discovery.ts`) and the chat opted in via `enableBrowserMcp`. One shared `chromium.launch()` per agent, one `BrowserContext` per `chatId` (cap 5 LRU, idle TTL 10 min). Frames stream as `BROWSER_FRAME` socket events into the dashboard's preview panel (Phase 3). `browser_save_state` / `browser_load_state` persist cookies + localStorage to `~/.dev-dashboard-agent/browser-state/<chatId>.json` (mode 0600) so logins can survive eviction.
+
+Neither MCP is mounted in `local` execution mode — the dashboard process doesn't launch Chromium and PM2 is on the agent host. For most users this is fine: chats run remote by default. The agent banner version (`agent/src/index.ts`) bumps whenever the MCP wiring changes — that's how we confirm a deployed agent has a given fix without shelling in.
+
 ## Conventions
 
 - **Next.js 16 has breaking changes from your training data.** Before writing route handlers, server actions, params, caching, or `next/*` imports, read the relevant page in `node_modules/next/dist/docs/`. Heed deprecation notices. (This is why `AGENTS.md` is imported at the top.)

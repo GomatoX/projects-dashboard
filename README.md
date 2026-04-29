@@ -200,6 +200,27 @@ launchctl unload "$PLIST" 2>/dev/null || true
 launchctl load "$PLIST"
 ```
 
+### Agent — Browser MCP (optional)
+
+Each agent device that should expose the in-chat browser tool needs Playwright
++ Chromium installed locally:
+
+```bash
+cd agent
+pnpm install                                              # already pulls playwright
+pnpm exec playwright install --with-deps chromium         # ~200 MB; needs sudo for system libs
+```
+
+After installing, restart the agent. Its startup log should report
+`📦 Capabilities: …, playwright`. Without this, chats that try to use the
+browser tool fail with a clear "Chromium not available" message — the PM2 MCP
+and other agent capabilities continue to work.
+
+Saved sign-in state (cookies + localStorage written by `browser_save_state`)
+lives at `~/.dev-dashboard-agent/browser-state/<chatId>.json`, mode `0600`
+inside a `0700` directory. Delete the directory to wipe all chat-level browser
+state.
+
 ### Agent uninstall
 
 Yra paruoštas `agent/uninstall.sh` — auto-detect'ina OS (`Darwin` / `Linux`) ir nuima service'ą:
