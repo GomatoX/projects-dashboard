@@ -133,6 +133,20 @@ export async function getOrCreateContext(
     };
     contexts.set(chatId, pooled);
 
+    // Attach the live screencast. Stored as a teardown so closeContext()
+    // also stops the stream cleanly.
+    if (agentSocket) {
+      const { attachScreencast } = await import('./screencast.js');
+      const detach = await attachScreencast({
+        ctx,
+        page,
+        chatId,
+        sessionId,
+        socket: agentSocket,
+      });
+      pooled.teardowns.push(detach);
+    }
+
     emit({
       type: 'BROWSER_CONTEXT_OPENED',
       chatId,
