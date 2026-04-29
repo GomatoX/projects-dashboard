@@ -119,6 +119,16 @@ export type AgentCommand =
       maxTurns?: number;
       claudePath?: string;
       permissions: ClaudePermissionConfig;
+      // ─── MCP gating (added 2026-04-29) ─────────────────────
+      /** When set, agent mounts the PM2 MCP scoped to this pm2Name. */
+      pm2Name?: string;
+      /**
+       * When true (and the agent has Playwright installed), agent mounts
+       * the Browser MCP. Default is `false` so older dashboards keep the
+       * pre-MCP behavior. Tighter than always-on so a stale dashboard
+       * never gets surprise tools.
+       */
+      enableBrowserMcp?: boolean;
       // ─── Attachments (images, PDFs, …) ──────────────────
       // The dashboard's filesystem is unreachable from the device, so we
       // ship metadata over the socket and let the agent fetch the bytes
@@ -253,6 +263,33 @@ export type AgentEvent =
       sessionId: string;
       requestId: string;
       message: string;
+    }
+  | {
+      type: 'BROWSER_CONTEXT_OPENED';
+      chatId: string;
+      sessionId: string;
+      /** Initial URL the context was created at, or `'about:blank'`. */
+      url: string;
+    }
+  | {
+      type: 'BROWSER_CONTEXT_CLOSED';
+      chatId: string;
+      /** 'idle' | 'evicted' | 'shutdown' | 'explicit' — for diagnostics only. */
+      reason: 'idle' | 'evicted' | 'shutdown' | 'explicit';
+    }
+  | {
+      type: 'BROWSER_FRAME';
+      chatId: string;
+      sessionId: string;
+      /** Base64-encoded JPEG bytes (no data: prefix). */
+      frameB64: string;
+      /** Wall-clock ms when the agent received the frame from CDP. */
+      timestamp: number;
+      /** Width/height of the JPEG in pixels (the agent caps these). */
+      width: number;
+      height: number;
+      /** Current page URL — useful for the panel header. */
+      url: string;
     };
 
 // ─── Response wrapper (for command → response flow) ───────
