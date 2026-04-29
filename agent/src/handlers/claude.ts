@@ -1,6 +1,7 @@
 import { hostname, homedir } from 'node:os';
 import { join } from 'node:path';
 import type { Socket } from 'socket.io-client';
+import type { McpServerConfig } from '@anthropic-ai/claude-agent-sdk';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 
 function expandHome(p: string): string {
@@ -23,6 +24,7 @@ import {
   fetchAttachments,
   rewritePromptPlaceholders,
 } from '../attachments.js';
+import { createPm2McpServer } from '../mcp/pm2.js';
 
 // ─── In-flight Claude sessions ────────────────────────────
 //
@@ -153,8 +155,7 @@ export async function runClaudeQuery(args: RunClaudeArgs): Promise<void> {
     agentToken,
   } = args;
 
-  // Touched in Phase 1/2 — keep referenced so lint doesn't complain.
-  void pm2Name;
+  // Touched in Phase 2 — keep referenced so lint doesn't complain.
   void enableBrowserMcp;
 
   const emit = (event: AgentEvent) => socket.emit('event', event);
@@ -230,6 +231,15 @@ export async function runClaudeQuery(args: RunClaudeArgs): Promise<void> {
       process.env.CLAUDE_PATH ||
       `${process.env.HOME}/.local/bin/claude`;
     const resolvedCwd = expandHome(projectPath);
+
+    // Build the per-call MCP map. Each entry is an in-process SDK MCP
+    // server bound to data this chat is authorized to see.
+    const mcpServers: Record<string, McpServerConfig> = {};
+    if (pm2Name) {
+      mcpServers.pm2 = createPm2McpServer(pm2Name);
+    }
+    // (Browser MCP added in Phase 2.)
+
     const agentQuery = query({
       prompt: resolvedPrompt,
       options: {
@@ -250,6 +260,7 @@ export async function runClaudeQuery(args: RunClaudeArgs): Promise<void> {
         allowDangerouslySkipPermissions: true,
         ...(systemPrompt ? { systemPrompt } : {}),
         tools: { type: 'preset', preset: 'claude_code' },
+        mcpServers,
         abortController: abort,
         canUseTool: async (toolName, input, opts) => {
           const verdict = evaluatePermission(
