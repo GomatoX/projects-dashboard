@@ -1027,7 +1027,12 @@ function handleRemoteStream(args: RemoteStreamArgs) {
           }
 
           case 'BROWSER_FRAME': {
-            await writeEvent(safeEnqueue, encoder, chatId, {
+            // Frames are live-only — DO NOT journal. At ~50 KB × 5–10 fps
+            // per chat, journaling would write ~1.5 GB per 10-min session
+            // to chat_stream_events, and a re-subscriber would replay the
+            // entire stale viewport history. Bypass writeEvent and push
+            // directly to the SSE stream.
+            const json = JSON.stringify({
               type: 'BROWSER_FRAME',
               sessionId: event.sessionId,
               frameB64: event.frameB64,
@@ -1035,8 +1040,8 @@ function handleRemoteStream(args: RemoteStreamArgs) {
               height: event.height,
               url: event.url,
               timestamp: event.timestamp,
-              chatId: event.chatId,
             });
+            safeEnqueue(encoder.encode(`data: ${json}\n\n`));
             break;
           }
 

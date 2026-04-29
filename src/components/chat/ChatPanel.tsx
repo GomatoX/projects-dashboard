@@ -190,6 +190,58 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
     [],
   );
 
+  // Shared dispatcher for the three BROWSER_* events emitted by the agent's
+  // browser MCP. Returns true when the event was handled (so the caller can
+  // early-return and skip the rest of its event-handler chain).
+  // Used from BOTH event-handler arms (live SSE loop + replay loop) — extracted
+  // to a single function so the two arms can't drift.
+  const handleBrowserEvent = useCallback(
+    (event: Record<string, unknown>, chatId: string): boolean => {
+      if (event.type === 'BROWSER_CONTEXT_OPENED') {
+        // Insert a synthetic 'browser' PreviewItem so the rail shows it.
+        // Content is empty — the live store carries the frames.
+        writePreview(chatId, (prev) =>
+          mergePreviewItem(
+            prev,
+            {
+              type: 'preview',
+              id: `browser:${chatId}`,
+              contentType: 'browser',
+              content: '',
+              title: 'Browser',
+            },
+            Date.now(),
+          ),
+        );
+        // Auto-open the panel the first time a browser context opens for this chat.
+        setPreviewOpen(true);
+        return true;
+      }
+      if (event.type === 'BROWSER_CONTEXT_CLOSED') {
+        // Remove the browser item from the rail. Other previews stay.
+        writePreview(chatId, (prev) => ({
+          ...prev,
+          items: prev.items.filter((i) => i.id !== `browser:${chatId}`),
+          activeId: prev.activeId === `browser:${chatId}` ? null : prev.activeId,
+        }));
+        clearBrowserFrames(chatId);
+        return true;
+      }
+      if (event.type === 'BROWSER_FRAME') {
+        pushFrame(chatId, {
+          frameB64: event.frameB64 as string,
+          width: event.width as number,
+          height: event.height as number,
+          url: event.url as string,
+          timestamp: event.timestamp as number,
+        });
+        return true;
+      }
+      return false;
+    },
+    [writePreview],
+  );
+
   // When switching chats, leave the panel closed by default — the rail still
   // shows the available previews so the user can click in if they want. Live
   // preview events (mid-stream) will auto-open the panel themselves; there's
@@ -383,46 +435,7 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
         setPreviewOpen(true);
         return;
       }
-      if (event.type === 'BROWSER_CONTEXT_OPENED') {
-        // Insert a synthetic 'browser' PreviewItem so the rail shows it.
-        // Content is empty — the live store carries the frames.
-        writePreview(chatId, (prev) =>
-          mergePreviewItem(
-            prev,
-            {
-              type: 'preview',
-              id: `browser:${chatId}`,
-              contentType: 'browser',
-              content: '',
-              title: 'Browser',
-            },
-            Date.now(),
-          ),
-        );
-        // Auto-open the panel the first time a browser context opens for this chat.
-        setPreviewOpen(true);
-        return;
-      }
-      if (event.type === 'BROWSER_CONTEXT_CLOSED') {
-        // Remove the browser item from the rail. Other previews stay.
-        writePreview(chatId, (prev) => ({
-          ...prev,
-          items: prev.items.filter((i) => i.id !== `browser:${chatId}`),
-          activeId: prev.activeId === `browser:${chatId}` ? null : prev.activeId,
-        }));
-        clearBrowserFrames(chatId);
-        return;
-      }
-      if (event.type === 'BROWSER_FRAME') {
-        pushFrame(chatId, {
-          frameB64: event.frameB64 as string,
-          width: event.width as number,
-          height: event.height as number,
-          url: event.url as string,
-          timestamp: event.timestamp as number,
-        });
-        return;
-      }
+      if (handleBrowserEvent(event, chatId)) return;
       if (event.type === 'done') {
         streaming.end(chatId);
         if (activeChatRef.current === chatId) {
@@ -450,7 +463,7 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
         streaming.end(chatId);
       }
     },
-    [streaming, fetchMessages, fetchChats, writePreview],
+    [streaming, fetchMessages, fetchChats, writePreview, handleBrowserEvent],
   );
 
   // ─── Reattach to a server-side live stream ──────────────────────────────
@@ -728,40 +741,8 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
           ),
         );
         setPreviewOpen(true);
-      } else if (event.type === 'BROWSER_CONTEXT_OPENED') {
-        // Insert a synthetic 'browser' PreviewItem so the rail shows it.
-        // Content is empty — the live store carries the frames.
-        writePreview(chatId, (prev) =>
-          mergePreviewItem(
-            prev,
-            {
-              type: 'preview',
-              id: `browser:${chatId}`,
-              contentType: 'browser',
-              content: '',
-              title: 'Browser',
-            },
-            Date.now(),
-          ),
-        );
-        // Auto-open the panel the first time a browser context opens for this chat.
-        setPreviewOpen(true);
-      } else if (event.type === 'BROWSER_CONTEXT_CLOSED') {
-        // Remove the browser item from the rail. Other previews stay.
-        writePreview(chatId, (prev) => ({
-          ...prev,
-          items: prev.items.filter((i) => i.id !== `browser:${chatId}`),
-          activeId: prev.activeId === `browser:${chatId}` ? null : prev.activeId,
-        }));
-        clearBrowserFrames(chatId);
-      } else if (event.type === 'BROWSER_FRAME') {
-        pushFrame(chatId, {
-          frameB64: event.frameB64 as string,
-          width: event.width as number,
-          height: event.height as number,
-          url: event.url as string,
-          timestamp: event.timestamp as number,
-        });
+      } else if (handleBrowserEvent(event, chatId)) {
+        // handled
       } else if (event.type === 'done') {
         // The server now persists the assistant row BEFORE emitting
         // `done`, so refetching /messages here is race-free and gives us
