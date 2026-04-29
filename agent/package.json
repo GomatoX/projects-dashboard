@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "node --import tsx src/index.ts",
-    "build": "tsc"
+    "build": "tsc",
+    "mcp:smoke": "node --import tsx src/mcp/browser/__smoke__/context-pool.smoke.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.119",
