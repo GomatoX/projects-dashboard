@@ -43,9 +43,10 @@ export function buildBrowserTools(deps: ToolDeps) {
       async ({ url, waitUntil }) => {
         try {
           const page = await getPage();
-          await page.goto(url, { waitUntil, timeout: 30_000 });
+          const resp = await page.goto(url, { waitUntil, timeout: 30_000 });
           touch(chatId);
-          return ok(`Navigated to ${page.url()} (status: ${page.url() ? 'ok' : 'unknown'})`);
+          const status = resp?.status() ?? 'unknown';
+          return ok(`Navigated to ${page.url()} (status: ${status})`);
         } catch (e) {
           return err(`Navigate failed: ${e instanceof Error ? e.message : String(e)}`);
         }
@@ -54,7 +55,7 @@ export function buildBrowserTools(deps: ToolDeps) {
 
     tool(
       'browser_click',
-      'Click an element by CSS selector or by accessible role+name. Prefer role+name when possible.',
+      'Click an element by CSS selector or by accessible role+name. Prefer role+name when possible. Supported role syntax: "role=TYPE" or "role=TYPE[name=\\"...\\"]" with double-quoted name (exact match). For other Playwright role options (level, pressed, checked, expanded, …), use a CSS selector instead.',
       {
         selector: z.string().describe('CSS selector or "role=button[name=\\"Submit\\"]" syntax.'),
       },
@@ -145,7 +146,8 @@ export function buildBrowserTools(deps: ToolDeps) {
           // page.accessibility.snapshot() was removed in Playwright 1.x.
           // The modern replacement is page.locator('body').ariaSnapshot() which
           // returns a YAML string directly (no JSON.stringify needed).
-          const snap = await page.locator('body').ariaSnapshot();
+          const rawSnap = await page.locator('body').ariaSnapshot();
+          const snap = rawSnap.trim() || '(empty — page may have no <body>, e.g. about:blank or chrome:// URLs)';
           const screenshot = await page.screenshot({
             type: 'jpeg',
             quality: 60,
@@ -174,7 +176,7 @@ export function buildBrowserTools(deps: ToolDeps) {
 
     tool(
       'browser_evaluate',
-      'Run a JavaScript expression in the page and return its JSON-serializable result. Use sparingly — prefer click/fill/snapshot.',
+      'Run a JavaScript expression in the BROWSER PAGE context (not Node.js) and return its JSON-serializable result. Use sparingly — prefer click/fill/snapshot.',
       {
         expression: z
           .string()
