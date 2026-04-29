@@ -55,6 +55,7 @@ import {
 } from '@/lib/ai/preview-types';
 import { extractAllPreviews } from '@/lib/ai/preview-detector';
 import { mergePreviewItem } from '@/lib/ai/preview-merge';
+import { pushFrame, clearChat as clearBrowserFrames } from '@/lib/ai/browser-frame-store';
 import { useLocalStorage } from '@mantine/hooks';
 
 interface Chat {
@@ -382,6 +383,46 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
         setPreviewOpen(true);
         return;
       }
+      if (event.type === 'BROWSER_CONTEXT_OPENED') {
+        // Insert a synthetic 'browser' PreviewItem so the rail shows it.
+        // Content is empty — the live store carries the frames.
+        writePreview(chatId, (prev) =>
+          mergePreviewItem(
+            prev,
+            {
+              type: 'preview',
+              id: `browser:${chatId}`,
+              contentType: 'browser',
+              content: '',
+              title: 'Browser',
+            },
+            Date.now(),
+          ),
+        );
+        // Auto-open the panel the first time a browser context opens for this chat.
+        setPreviewOpen(true);
+        return;
+      }
+      if (event.type === 'BROWSER_CONTEXT_CLOSED') {
+        // Remove the browser item from the rail. Other previews stay.
+        writePreview(chatId, (prev) => ({
+          ...prev,
+          items: prev.items.filter((i) => i.id !== `browser:${chatId}`),
+          activeId: prev.activeId === `browser:${chatId}` ? null : prev.activeId,
+        }));
+        clearBrowserFrames(chatId);
+        return;
+      }
+      if (event.type === 'BROWSER_FRAME') {
+        pushFrame(chatId, {
+          frameB64: event.frameB64 as string,
+          width: event.width as number,
+          height: event.height as number,
+          url: event.url as string,
+          timestamp: event.timestamp as number,
+        });
+        return;
+      }
       if (event.type === 'done') {
         streaming.end(chatId);
         if (activeChatRef.current === chatId) {
@@ -687,6 +728,40 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
           ),
         );
         setPreviewOpen(true);
+      } else if (event.type === 'BROWSER_CONTEXT_OPENED') {
+        // Insert a synthetic 'browser' PreviewItem so the rail shows it.
+        // Content is empty — the live store carries the frames.
+        writePreview(chatId, (prev) =>
+          mergePreviewItem(
+            prev,
+            {
+              type: 'preview',
+              id: `browser:${chatId}`,
+              contentType: 'browser',
+              content: '',
+              title: 'Browser',
+            },
+            Date.now(),
+          ),
+        );
+        // Auto-open the panel the first time a browser context opens for this chat.
+        setPreviewOpen(true);
+      } else if (event.type === 'BROWSER_CONTEXT_CLOSED') {
+        // Remove the browser item from the rail. Other previews stay.
+        writePreview(chatId, (prev) => ({
+          ...prev,
+          items: prev.items.filter((i) => i.id !== `browser:${chatId}`),
+          activeId: prev.activeId === `browser:${chatId}` ? null : prev.activeId,
+        }));
+        clearBrowserFrames(chatId);
+      } else if (event.type === 'BROWSER_FRAME') {
+        pushFrame(chatId, {
+          frameB64: event.frameB64 as string,
+          width: event.width as number,
+          height: event.height as number,
+          url: event.url as string,
+          timestamp: event.timestamp as number,
+        });
       } else if (event.type === 'done') {
         // The server now persists the assistant row BEFORE emitting
         // `done`, so refetching /messages here is race-free and gives us

@@ -1010,6 +1010,36 @@ function handleRemoteStream(args: RemoteStreamArgs) {
             break;
           }
 
+          case 'BROWSER_CONTEXT_OPENED': {
+            await writeEvent(safeEnqueue, encoder, chatId, {
+              type: 'BROWSER_CONTEXT_OPENED',
+              sessionId: event.sessionId,
+            });
+            break;
+          }
+
+          case 'BROWSER_CONTEXT_CLOSED': {
+            await writeEvent(safeEnqueue, encoder, chatId, {
+              type: 'BROWSER_CONTEXT_CLOSED',
+              sessionId: event.sessionId,
+            });
+            break;
+          }
+
+          case 'BROWSER_FRAME': {
+            await writeEvent(safeEnqueue, encoder, chatId, {
+              type: 'BROWSER_FRAME',
+              sessionId: event.sessionId,
+              frameB64: event.frameB64,
+              width: event.width,
+              height: event.height,
+              url: event.url,
+              timestamp: event.timestamp,
+              chatId: event.chatId,
+            });
+            break;
+          }
+
           default:
             // CLAUDE_STARTED, PROXY_READY — informational, no SSE needed
             break;
