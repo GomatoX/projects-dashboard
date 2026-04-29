@@ -1051,6 +1051,11 @@ function handleRemoteStream(args: RemoteStreamArgs) {
         ...(systemPrompt ? { systemPrompt } : {}),
         ...(chat.model ? { model: chat.model } : {}),
         permissions,
+        // MCP gating: pin PM2 to this project's process, and turn on
+        // Browser MCP unconditionally — the agent decides whether it can
+        // actually mount it based on local capability detection.
+        ...(project.pm2Name ? { pm2Name: project.pm2Name } : {}),
+        enableBrowserMcp: true,
         // Only attach the metadata block when there's actually something to
         // download — a 0-length array would make the agent log "fetching 0
         // attachments" which is just noise.
