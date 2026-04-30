@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useStreamingState } from './streaming-state';
+import { useChatStreamSlice } from './streaming-store';
 import {
   Box,
   Group,
@@ -260,9 +261,10 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
   const [isResizing, setIsResizing] = useState(false);
 
   const streaming = useStreamingState();
-  // Read the current streaming state slice for the active chat once per render.
-  // Passed into effect deps as individual scalar values (not the get() function).
-  const activeStreamState = activeChat ? streaming.get(activeChat) : null;
+  // Subscribed read of the active chat's slice. Re-renders the panel ONLY
+  // when this chat's streaming state actually changes — token deltas on a
+  // background chat do not wake this component.
+  const activeStreamState = useChatStreamSlice(activeChat);
 
   // Load last selected model from localStorage on mount
   useEffect(() => {
