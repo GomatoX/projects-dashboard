@@ -25,8 +25,6 @@ import {
 } from '@mantine/core';
 import {
   IconPlus,
-  IconMessageCircle,
-  IconTrash,
   IconSparkles,
   IconCoins,
   IconServer,
@@ -36,6 +34,7 @@ import {
 } from '@tabler/icons-react';
 import { notify } from '@/lib/notify';
 import { playSound } from '@/lib/audio';
+import { ChatList } from './ChatList';
 import { ChatMessage, type ChatMsg } from './ChatMessage';
 import { ChatInput, type PendingAttachment } from './ChatInput';
 import { useStickToBottom } from './useStickToBottom';
@@ -1072,134 +1071,14 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
         backgroundColor: 'var(--mantine-color-dark-8)',
       }}
     >
-      {/* Chat List Sidebar */}
-      <Box
-        style={{
-          width: 240,
-          minWidth: 200,
-          borderRight: '1px solid var(--mantine-color-dark-6)',
-          backgroundColor: 'var(--mantine-color-dark-9)',
-          display: 'flex',
-          flexDirection: 'column',
-        }}
-      >
-        <Stack gap={0}>
-          <Group
-            gap="xs"
-            px="sm"
-            h={45}
-            align="center"
-            wrap="nowrap"
-            style={{ borderBottom: '1px solid var(--mantine-color-dark-6)' }}
-          >
-            <Text size="xs" fw={600} c="dimmed" tt="uppercase" style={{ flex: 1 }}>
-              Chats
-            </Text>
-            <Tooltip label="New Chat">
-              <ActionIcon variant="light" size="sm" color="brand" onClick={createChat}>
-                <IconPlus size={14} />
-              </ActionIcon>
-            </Tooltip>
-          </Group>
-        </Stack>
-
-        <ScrollArea style={{ flex: 1 }} type="auto">
-          <Stack gap={0} p={4}>
-            {chatList.length === 0 ? (
-              <Text size="xs" c="dimmed" ta="center" py="lg">
-                No chats yet
-              </Text>
-            ) : (
-              chatList.map((chat) => {
-                const isStreaming =
-                  streamingChats.has(chat.id) ||
-                  serverStreamingChats.has(chat.id) ||
-                  Boolean(chat.isStreaming);
-                return (
-                  <Box
-                    key={chat.id}
-                    w="100%"
-                    py={8}
-                    px={10}
-                    onClick={() => switchChat(chat.id)}
-                    style={{
-                      borderRadius: 'var(--mantine-radius-sm)',
-                      backgroundColor:
-                        chat.id === activeChat
-                          ? 'rgba(0, 200, 200, 0.08)'
-                          : 'transparent',
-                      borderLeft:
-                        chat.id === activeChat
-                          ? '2px solid var(--mantine-color-brand-5)'
-                          : '2px solid transparent',
-                      transition: 'background-color 0.1s',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <Group gap={6} wrap="nowrap">
-                      {isStreaming ? (
-                        <Tooltip label="Chat is processing…" position="right" withArrow>
-                          <Box
-                            style={{
-                              width: 12,
-                              height: 12,
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              flexShrink: 0,
-                            }}
-                          >
-                            <Loader size={12} color="brand" type="oval" />
-                          </Box>
-                        </Tooltip>
-                      ) : (
-                        <IconMessageCircle
-                          size={12}
-                          style={{
-                            opacity: chat.id === activeChat ? 0.8 : 0.3,
-                            flexShrink: 0,
-                          }}
-                        />
-                      )}
-                      <Text
-                        size="xs"
-                        lineClamp={1}
-                        // Active chat title uses the default body text color so
-                        // it stays high-contrast in both schemes. (`gray.2` is
-                        // `#e9ecef` — invisible on white in light mode.)
-                        c={chat.id === activeChat ? undefined : 'dimmed'}
-                        fw={chat.id === activeChat ? 600 : 400}
-                        style={{ flex: 1 }}
-                      >
-                        {chat.title}
-                      </Text>
-                      <ActionIcon
-                        variant="subtle"
-                        color="red"
-                        size={16}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          deleteChat(chat.id);
-                        }}
-                        style={{ opacity: 0.3, flexShrink: 0 }}
-                        onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.3'; }}
-                      >
-                        <IconTrash size={10} />
-                      </ActionIcon>
-                    </Group>
-                    {chat.estimatedCost > 0 && (
-                      <Text size="xs" c="dimmed" mt={2} style={{ fontSize: 10 }}>
-                        ${chat.estimatedCost.toFixed(4)}
-                      </Text>
-                    )}
-                  </Box>
-                );
-              })
-            )}
-          </Stack>
-        </ScrollArea>
-      </Box>
+      <ChatList
+        items={chatList}
+        activeId={activeChat}
+        serverStreaming={serverStreamingChats}
+        onSelect={switchChat}
+        onDelete={deleteChat}
+        onCreate={createChat}
+      />
 
       {/* Chat-area + preview-dock row. The OUTER box holds the rail too so
           it stays anchored to the right edge. The INNER box (containerRef)
