@@ -45,7 +45,6 @@ interface UseChatStreamArgs {
   projectId: string;
   activeChat: string | null;
   serverStreamingChats: ReadonlySet<string>;
-  setServerStreamingChats: React.Dispatch<React.SetStateAction<Set<string>>>;
   fetchMessages: (chatId: string) => Promise<void>;
   fetchChats: () => Promise<unknown>;
   /** Open the preview panel — called from preview/browser event handlers. */

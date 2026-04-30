@@ -60,7 +60,6 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
     projectId,
     activeChat: list.activeChat,
     serverStreamingChats: list.serverStreamingChats,
-    setServerStreamingChats: list.setServerStreamingChats,
     fetchMessages: list.fetchMessages,
     fetchChats: list.fetchChats,
     openPreview: () => setPreviewOpen(true),
