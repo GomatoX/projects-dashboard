@@ -9,7 +9,6 @@ import { Header } from '@/components/shell/Header';
 import { Sidebar } from '@/components/shell/Sidebar';
 import { ActiveTitleUpdater } from '@/components/shell/ActiveTitleUpdater';
 import { loadSoundSettings } from '@/lib/audio';
-import { StreamingStateProvider } from '@/components/chat/streaming-state';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [opened, { toggle }] = useDisclosure();
@@ -75,7 +74,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <AppShell.Main>
           <div className="animated-grid-bg" />
           <div className="animate-fade-in">
-            <StreamingStateProvider>{children}</StreamingStateProvider>
+            {children}
           </div>
         </AppShell.Main>
       </AppShell>
