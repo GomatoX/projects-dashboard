@@ -15,21 +15,13 @@ import {
   Text,
   Button,
   ActionIcon,
-  Tooltip,
-  Badge,
   ScrollArea,
   Center,
   Loader,
-  Select,
-  SegmentedControl,
 } from '@mantine/core';
 import {
   IconPlus,
   IconSparkles,
-  IconCoins,
-  IconServer,
-  IconCloud,
-  IconPlayerStopFilled,
   IconArrowDown,
 } from '@tabler/icons-react';
 import { notify } from '@/lib/notify';
@@ -50,6 +42,7 @@ interface UploadedAttachment {
   size: number;
   url: string;
 }
+import { ChatHeader, MODEL_OPTIONS } from './ChatHeader';
 import { ToolApprovalCard, ToolActivityBadge, type PermissionRequest, type ToolActivity } from './ToolApprovalCard';
 import { PreviewPanel } from './PreviewPanel';
 import { PreviewRail } from './PreviewRail';
@@ -82,12 +75,6 @@ interface ChatPanelProps {
   deviceId: string | null;
   deviceConnected?: boolean;
 }
-
-const MODEL_OPTIONS = [
-  { value: 'claude-opus-4-7', label: 'Opus 4.7' },
-  { value: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
-  { value: 'claude-haiku-4-5', label: 'Haiku 4.5' },
-];
 
 const LAST_MODEL_STORAGE_KEY = 'chat:lastSelectedModel';
 const LAST_MODE_STORAGE_KEY = 'chat:lastExecutionMode';
@@ -1118,159 +1105,48 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
       >
         {/* Header */}
         {activeChatData && (
-          <Group
-            px="md"
-            h={45}
-            align="center"
-            justify="space-between"
-            wrap="nowrap"
-            style={{
-              borderBottom: '1px solid var(--mantine-color-dark-6)',
-              backgroundColor: 'var(--mantine-color-dark-9)',
+          <ChatHeader
+            title={activeChatData.title}
+            estimatedCost={activeChatData.estimatedCost}
+            executionMode={activeChatData.executionMode ?? 'local'}
+            selectedModel={selectedModel}
+            isStreaming={activeShowsLiveTurn}
+            isCancelling={!!activeChat && cancellingChats.has(activeChat)}
+            deviceId={deviceId}
+            deviceConnected={deviceConnected}
+            onStop={() => activeChat && stopChat(activeChat)}
+            onModelChange={(val) => {
+              setSelectedModel(val);
+              if (typeof window !== 'undefined') {
+                window.localStorage.setItem(LAST_MODEL_STORAGE_KEY, val);
+              }
+              if (activeChat) {
+                fetch(`/api/projects/${projectId}/chat/${activeChat}`, {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ model: val }),
+                });
+                setChatList((prev) =>
+                  prev.map((c) => (c.id === activeChat ? { ...c, model: val } : c)),
+                );
+              }
             }}
-          >
-            <Group gap="sm" align="center" wrap="nowrap">
-              {activeShowsLiveTurn ? (
-                <Tooltip label="Chat is processing…" withArrow>
-                  <Box style={{ display: 'flex', alignItems: 'center' }}>
-                    <Loader size={14} color="brand" type="oval" />
-                  </Box>
-                </Tooltip>
-              ) : (
-                <IconSparkles size={16} style={{ color: 'var(--mantine-color-brand-5)', display: 'block' }} />
-              )}
-              <Text size="sm" fw={500}>
-                {activeChatData.title}
-              </Text>
-              {activeShowsLiveTurn && activeChat && (
-                <Tooltip
-                  label={
-                    cancellingChats.has(activeChat) ? 'Stopping…' : 'Stop generating'
-                  }
-                  withArrow
-                >
-                  <ActionIcon
-                    size="sm"
-                    color="red"
-                    variant="light"
-                    loading={cancellingChats.has(activeChat)}
-                    disabled={cancellingChats.has(activeChat)}
-                    onClick={() => stopChat(activeChat)}
-                    aria-label="Stop generating"
-                  >
-                    <IconPlayerStopFilled size={12} />
-                  </ActionIcon>
-                </Tooltip>
-              )}
-            </Group>
-            <Group gap="xs" align="center" wrap="nowrap">
-              <Select
-                size="xs"
-                value={selectedModel}
-                onChange={(val) => {
-                  if (!val) return;
-                  setSelectedModel(val);
-                  if (typeof window !== 'undefined') {
-                    window.localStorage.setItem(LAST_MODEL_STORAGE_KEY, val);
-                  }
-                  if (activeChat) {
-                    fetch(`/api/projects/${projectId}/chat/${activeChat}`, {
-                      method: 'PATCH',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ model: val }),
-                    });
-                    setChatList((prev) =>
-                      prev.map((c) => (c.id === activeChat ? { ...c, model: val } : c)),
-                    );
-                  }
-                }}
-                data={MODEL_OPTIONS}
-                allowDeselect={false}
-                styles={{
-                  input: {
-                    backgroundColor: 'var(--mantine-color-dark-7)',
-                    borderColor: 'var(--mantine-color-dark-5)',
-                    fontSize: '11px',
-                    minHeight: '33px',
-                    height: '33px',
-                    width: '140px',
-                  },
-                }}
-              />
-              {deviceId && (
-                <SegmentedControl
-                  size="xs"
-                  value={activeChatData.executionMode ?? 'local'}
-                  onChange={(val) => {
-                    const mode = val as 'local' | 'remote';
-                    if (typeof window !== 'undefined') {
-                      window.localStorage.setItem(LAST_MODE_STORAGE_KEY, mode);
-                    }
-                    if (activeChat) {
-                      fetch(`/api/projects/${projectId}/chat/${activeChat}`, {
-                        method: 'PATCH',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ executionMode: mode }),
-                      });
-                      setChatList((prev) =>
-                        prev.map((c) =>
-                          c.id === activeChat ? { ...c, executionMode: mode } : c,
-                        ),
-                      );
-                    }
-                  }}
-                  data={[
-                    {
-                      value: 'local',
-                      label: (
-                        <Group gap={4} wrap="nowrap">
-                          <IconServer size={12} />
-                          <span>Local</span>
-                        </Group>
-                      ),
-                    },
-                    {
-                      value: 'remote',
-                      label: (
-                        <Group gap={4} wrap="nowrap">
-                          <IconCloud size={12} />
-                          <span>On device</span>
-                          {deviceConnected !== undefined && (
-                            <Box
-                              style={{
-                                width: 6,
-                                height: 6,
-                                borderRadius: '50%',
-                                backgroundColor: deviceConnected
-                                  ? 'var(--mantine-color-green-5)'
-                                  : 'var(--mantine-color-red-5)',
-                              }}
-                            />
-                          )}
-                        </Group>
-                      ),
-                    },
-                  ]}
-                  styles={{
-                    root: {
-                      backgroundColor: 'var(--mantine-color-dark-7)',
-                      border: '1px solid var(--mantine-color-dark-5)',
-                    },
-                  }}
-                />
-              )}
-              {activeChatData.estimatedCost > 0 && (
-                <Badge
-                  size="xs"
-                  variant="light"
-                  color="yellow"
-                  leftSection={<IconCoins size={8} />}
-                >
-                  ${activeChatData.estimatedCost.toFixed(4)}
-                </Badge>
-              )}
-            </Group>
-          </Group>
+            onModeChange={(mode) => {
+              if (typeof window !== 'undefined') {
+                window.localStorage.setItem(LAST_MODE_STORAGE_KEY, mode);
+              }
+              if (activeChat) {
+                fetch(`/api/projects/${projectId}/chat/${activeChat}`, {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ executionMode: mode }),
+                });
+                setChatList((prev) =>
+                  prev.map((c) => (c.id === activeChat ? { ...c, executionMode: mode } : c)),
+                );
+              }
+            }}
+          />
         )}
 
         {/* Messages — wrapped in a position:relative box so the
