@@ -1,12 +1,7 @@
 'use client';
 
-import { useState, useCallback, useEffect, useRef } from 'react';
-import { useStreamingState } from './streaming-state';
+import { useState, useRef, useEffect } from 'react';
 import { useChatStreamSlice } from './streaming-store';
-import {
-  hasPreview as hasPreviewInStore,
-  writePreview as writePreviewToStore,
-} from './preview-store';
 import {
   Box,
   Stack,
@@ -22,49 +17,19 @@ import {
   IconSparkles,
   IconArrowDown,
 } from '@tabler/icons-react';
-import { notify } from '@/lib/notify';
-import { playSound } from '@/lib/audio';
 import { ChatList } from './ChatList';
-import { ChatMessage, type ChatMsg } from './ChatMessage';
-import { ChatInput, type PendingAttachment } from './ChatInput';
-import { useStickToBottom } from './useStickToBottom';
-
-// Server-side metadata returned by POST /attachments after the file lands
-// on disk. This is the exact shape persisted into chatMessages.attachments
-// (as JSON) and what ChatMessage renders thumbnails from.
-interface UploadedAttachment {
-  id: string;
-  filename: string;
-  name: string;
-  type: string;
-  size: number;
-  url: string;
-}
-import { ChatHeader, MODEL_OPTIONS } from './ChatHeader';
-import { type PermissionRequest, type ToolActivity } from './ToolApprovalCard';
+import { ChatMessage } from './ChatMessage';
+import { ChatInput } from './ChatInput';
+import { ChatHeader } from './ChatHeader';
 import { StreamingBubble } from './StreamingBubble';
 import { PreviewHost, PreviewRailHost } from './PreviewHost';
-import {
-  EMPTY_PREVIEW_STATE,
-  type PreviewState,
-} from '@/lib/ai/preview-types';
-import { extractAllPreviews } from '@/lib/ai/preview-detector';
-import { mergePreviewItem } from '@/lib/ai/preview-merge';
-import { pushFrame, clearChat as clearBrowserFrames } from '@/lib/ai/browser-frame-store';
+import { useStickToBottom } from './useStickToBottom';
+import { useChatsList } from './use-chats-list';
+import { useChatStream } from './use-chat-stream';
 
-interface Chat {
-  id: string;
-  projectId: string;
-  title: string;
-  model: string;
-  executionMode: 'local' | 'remote';
-  totalTokensIn: number;
-  totalTokensOut: number;
-  estimatedCost: number;
-  createdAt: string;
-  updatedAt: string;
-  isStreaming?: boolean;
-}
+const LAST_MODEL_STORAGE_KEY = 'chat:lastSelectedModel';
+const LAST_MODE_STORAGE_KEY = 'chat:lastExecutionMode';
+const DEFAULT_MODEL = 'claude-sonnet-4-6';
 
 interface ChatPanelProps {
   projectId: string;
@@ -72,440 +37,41 @@ interface ChatPanelProps {
   deviceConnected?: boolean;
 }
 
-const LAST_MODEL_STORAGE_KEY = 'chat:lastSelectedModel';
-const LAST_MODE_STORAGE_KEY = 'chat:lastExecutionMode';
-const DEFAULT_MODEL = 'claude-sonnet-4-6';
-const CHAT_LIST_POLL_MS = 3000;
-
-// Helpers for working with the per-chat Sets / Records — keeping these as
-// tiny pure functions makes the state updates below much easier to read.
-function withAdded(set: Set<string>, key: string): Set<string> {
-  if (set.has(key)) return set;
-  const next = new Set(set);
-  next.add(key);
-  return next;
-}
-
-function withRemoved(set: Set<string>, key: string): Set<string> {
-  if (!set.has(key)) return set;
-  const next = new Set(set);
-  next.delete(key);
-  return next;
-}
-
 export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelProps) {
-  const [chatList, setChatList] = useState<Chat[]>([]);
-  const [activeChat, setActiveChat] = useState<string | null>(null);
-  // Messages are still shown only for the active chat — switching chats
-  // replaces this list. Background streams persist their assistant messages
-  // server-side and are picked up on the next switch.
-  const [messages, setMessages] = useState<ChatMsg[]>([]);
-  const [loading, setLoading] = useState(true);
-  // ─── Per-chat streaming state ─────────────────────────────────────────
-  // Multiple chats can stream concurrently, so every piece of "live turn"
-  // state is keyed by chatId. The previous version kept a single boolean /
-  // string per panel, which forced the input to be disabled in *every* chat
-  // whenever any chat was streaming and leaked the typing indicator into
-  // whichever chat happened to be active when an event arrived.
-  const [streamingChats, setStreamingChats] = useState<Set<string>>(new Set());
-  // Server-reported in-flight turns (e.g. after a refresh, or another tab
-  // started the stream). Populated by the chat list poll + the messages
-  // fetch on chat switch.
-  const [serverStreamingChats, setServerStreamingChats] = useState<Set<string>>(new Set());
-  const [respondingTo, setRespondingTo] = useState<string | null>(null);
-  const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL);
+  const containerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  // Per-chat AbortController for the in-flight POST /stream fetch. Held in
-  // a ref (not state) because it's mutated from inside `sendMessage`'s
-  // closure and the Stop button — neither needs a re-render. Cleaned up in
-  // sendMessage's `finally` and on stopChat success. Keyed by chatId so a
-  // stop click on one chat can't accidentally abort a sibling stream.
-  const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
-  // Set of chat IDs the user has just clicked Stop on. We disable the
-  // button while the cancel request is in flight; cleared once the
-  // surviving SSE handler hits `done` (or the network roundtrip fails).
-  const [cancellingChats, setCancellingChats] = useState<Set<string>>(new Set());
-  // Tracks the chat the user is currently viewing without re-creating the
-  // sendMessage closure on every switch. The streaming reader runs for the
-  // full duration of an agent turn and needs an up-to-date reference, not the
-  // value captured when sendMessage was called.
-  const activeChatRef = useRef<string | null>(null);
-  useEffect(() => {
-    activeChatRef.current = activeChat;
-  }, [activeChat]);
+
+  const list = useChatsList(projectId, DEFAULT_MODEL);
 
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewExpanded, setPreviewExpanded] = useState(false);
-
-  // Shared dispatcher for the three BROWSER_* events emitted by the agent's
-  // browser MCP. Returns true when the event was handled (so the caller can
-  // early-return and skip the rest of its event-handler chain).
-  // Used from BOTH event-handler arms (live SSE loop + replay loop) — extracted
-  // to a single function so the two arms can't drift.
-  const handleBrowserEvent = useCallback(
-    (event: Record<string, unknown>, chatId: string): boolean => {
-      if (event.type === 'BROWSER_CONTEXT_OPENED') {
-        // Insert a synthetic 'browser' PreviewItem so the rail shows it.
-        // Content is empty — the live store carries the frames.
-        writePreviewToStore(chatId, (prev) =>
-          mergePreviewItem(
-            prev,
-            {
-              type: 'preview',
-              id: `browser:${chatId}`,
-              contentType: 'browser',
-              content: '',
-              title: 'Browser',
-            },
-            Date.now(),
-          ),
-        );
-        // Auto-open the panel the first time a browser context opens for this chat.
-        setPreviewOpen(true);
-        return true;
-      }
-      if (event.type === 'BROWSER_CONTEXT_CLOSED') {
-        // Remove the browser item from the rail. Other previews stay.
-        writePreviewToStore(chatId, (prev) => ({
-          ...prev,
-          items: prev.items.filter((i) => i.id !== `browser:${chatId}`),
-          activeId: prev.activeId === `browser:${chatId}` ? null : prev.activeId,
-        }));
-        clearBrowserFrames(chatId);
-        return true;
-      }
-      if (event.type === 'BROWSER_FRAME') {
-        pushFrame(chatId, {
-          frameB64: event.frameB64 as string,
-          width: event.width as number,
-          height: event.height as number,
-          url: event.url as string,
-          timestamp: event.timestamp as number,
-        });
-        return true;
-      }
-      return false;
-    },
-    [],
-  );
 
   // When switching chats, leave the panel closed by default — the rail still
   // shows the available previews so the user can click in if they want. Live
   // preview events (mid-stream) will auto-open the panel themselves; there's
   // no reason to force-open just because we navigated.
   useEffect(() => {
-    if (!activeChat) return;
+    if (!list.activeChat) return;
     setPreviewOpen(false);
     setPreviewExpanded(false);
-  }, [activeChat]);
+  }, [list.activeChat]);
 
-  const containerRef = useRef<HTMLDivElement>(null);
+  const stream = useChatStream({
+    projectId,
+    activeChat: list.activeChat,
+    serverStreamingChats: list.serverStreamingChats,
+    setServerStreamingChats: list.setServerStreamingChats,
+    fetchMessages: list.fetchMessages,
+    fetchChats: list.fetchChats,
+    openPreview: () => setPreviewOpen(true),
+    appendOptimisticUserMessage: (m) => list.setMessages((prev) => [...prev, m]),
+    chatList: list.chatList,
+  });
 
-  const streaming = useStreamingState();
   // Subscribed read of the active chat's slice. Re-renders the panel ONLY
   // when this chat's streaming state actually changes — token deltas on a
   // background chat do not wake this component.
-  const activeStreamState = useChatStreamSlice(activeChat);
-
-  // Load last selected model from localStorage on mount
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const saved = window.localStorage.getItem(LAST_MODEL_STORAGE_KEY);
-    if (saved && MODEL_OPTIONS.some((m) => m.value === saved)) {
-      setSelectedModel(saved);
-    }
-  }, []);
-
-  // Fetch chat list. The endpoint annotates each chat with `isStreaming`,
-  // which we mirror into `serverStreamingChats` so the panel stays in sync
-  // even for chats this browser isn't actively driving.
-  const fetchChats = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/projects/${projectId}/chat`);
-      const data: Chat[] = await res.json();
-      setChatList(data);
-      setServerStreamingChats((prev) => {
-        const next = new Set<string>();
-        for (const c of data) {
-          if (c.isStreaming) next.add(c.id);
-        }
-        // Avoid pointless re-renders if nothing changed.
-        if (next.size === prev.size && [...next].every((id) => prev.has(id))) {
-          return prev;
-        }
-        return next;
-      });
-      return data;
-    } catch {
-      return [];
-    }
-  }, [projectId]);
-
-  // Fetch messages for a chat. Also picks up the server-side `isStreaming`
-  // flag so a page refresh mid-turn restores the "Thinking..." indicator.
-  const fetchMessages = useCallback(
-    async (chatId: string) => {
-      try {
-        const res = await fetch(
-          `/api/projects/${projectId}/chat/${chatId}/messages`,
-        );
-        const data = await res.json();
-        // Tolerate the legacy array-shaped response in case anything still
-        // returns it (older client cache, dev hot-reload, etc.).
-        const msgs: ChatMsg[] = Array.isArray(data) ? data : (data.messages ?? []);
-        const isStreaming =
-          !Array.isArray(data) && Boolean(data.isStreaming);
-        setMessages(msgs);
-        setServerStreamingChats((prev) =>
-          isStreaming ? withAdded(prev, chatId) : withRemoved(prev, chatId),
-        );
-
-        // Restore history previews only when no live state exists yet —
-        // a live stream populates the store and overrides this path.
-        if (!hasPreviewInStore(chatId)) {
-          let restored: PreviewState = EMPTY_PREVIEW_STATE;
-          for (const m of msgs) {
-            if (m.role !== 'assistant' || !m.content) continue;
-            const events = extractAllPreviews(m.content);
-            for (const ev of events) {
-              restored = mergePreviewItem(restored, ev, Date.now());
-            }
-          }
-          if (restored.items.length > 0) {
-            writePreviewToStore(chatId, () => restored);
-          }
-        }
-      } catch {
-        setMessages([]);
-      }
-    },
-    [projectId],
-  );
-
-  // Load initial data
-  useEffect(() => {
-    (async () => {
-      const existingChats = await fetchChats();
-      if (existingChats.length > 0) {
-        setActiveChat(existingChats[0].id);
-        await fetchMessages(existingChats[0].id);
-      }
-      setLoading(false);
-    })();
-  }, [fetchChats, fetchMessages]);
-
-  // Poll the chat list so cross-chat activity (other tabs, background turns,
-  // a sibling chat that just finished) is reflected without manual refresh.
-  // Cheap query — single SELECT plus an in-memory Map lookup per row.
-  useEffect(() => {
-    const interval = setInterval(() => {
-      fetchChats();
-    }, CHAT_LIST_POLL_MS);
-    return () => clearInterval(interval);
-  }, [fetchChats]);
-
-  // Handles SSE events from the /stream/subscribe endpoint (reattach path).
-  // Mirrors `handleEvent` in sendMessage, but writes exclusively through the
-  // streaming context (no local `accumulated` string — context.content is the
-  // accumulator). Stable as long as `streaming`, `fetchMessages`, and
-  // `fetchChats` are stable.
-  const handleSubscribedEvent = useCallback(
-    (chatId: string, event: Record<string, unknown>) => {
-      if (event.type === 'session_started') {
-        streaming.setSessionId(chatId, event.sessionId as string);
-        return;
-      }
-      if (event.type === 'text') {
-        // The reattach effect calls `streaming.begin(chatId)` once before
-        // pumping events into us, so by the time we get here the slice is
-        // already active. We deliberately do NOT read `streaming.get` —
-        // this callback's `streaming` is captured at mount and `get` is a
-        // closure over a stale `byChat`, which would always return
-        // EMPTY_STATE and trigger a content-wiping `begin()` on every
-        // delta.
-        streaming.appendText(chatId, event.text as string);
-        return;
-      }
-      if (event.type === 'turn_break') {
-        streaming.appendTurnBreak(chatId);
-        return;
-      }
-      if (event.type === 'tool_use') {
-        const tool = event.tool as Record<string, unknown>;
-        streaming.addToolActivity(chatId, {
-          id: tool.id as string,
-          toolName: tool.toolName as string,
-          displayName: tool.displayName as string,
-          status: tool.status as ToolActivity['status'],
-          input: tool.input as Record<string, unknown>,
-        });
-        return;
-      }
-      if (event.type === 'permission_request') {
-        streaming.addPermission(chatId, {
-          toolUseId: (event.toolUseId ?? event.requestId) as string,
-          toolName: event.toolName as string,
-          displayName: (event.displayName ?? event.toolName) as string,
-          category: (event.category ?? 'execute') as PermissionRequest['category'],
-          input: event.input as Record<string, unknown>,
-          title: (event.title ?? event.reason ?? `${event.toolName}`) as string,
-          description: event.description as string | undefined,
-          status: 'pending',
-        });
-        return;
-      }
-      if (event.type === 'preview') {
-        writePreviewToStore(chatId, (prev) =>
-          mergePreviewItem(
-            prev,
-            {
-              type: 'preview',
-              id: event.id as string,
-              contentType: event.contentType as 'html' | 'markdown' | 'mermaid' | 'svg' | 'diff',
-              content: event.content as string,
-              title: event.title as string | undefined,
-            },
-            Date.now(),
-          ),
-        );
-        setPreviewOpen(true);
-        return;
-      }
-      if (handleBrowserEvent(event, chatId)) return;
-      if (event.type === 'done') {
-        streaming.end(chatId);
-        if (activeChatRef.current === chatId) {
-          // Refetch messages so the persisted assistant row replaces the
-          // live bubble, THEN clear the live state. Doing both in this
-          // order avoids a flash where the bubble disappears before the
-          // persisted row has rendered.
-          fetchMessages(chatId).finally(() => {
-            streaming.clear(chatId);
-          });
-        } else {
-          // Not the active chat — no bubble to flash. Clear immediately.
-          streaming.clear(chatId);
-        }
-        fetchChats();
-        playSound('taskComplete');
-        return;
-      }
-      if (event.type === 'error') {
-        notify({
-          title: 'AI Error',
-          message: event.message as string,
-          color: 'red',
-        });
-        streaming.end(chatId);
-      }
-    },
-    [streaming, fetchMessages, fetchChats, handleBrowserEvent],
-  );
-
-  // ─── Reattach to a server-side live stream ──────────────────────────────
-  // When the server reports a chat is mid-turn but this browser is not
-  // driving the POST (page reload, project switch return, tab switch with
-  // a different active chat), open a SSE subscription to /stream/subscribe
-  // and pipe its events through handleSubscribedEvent. This restores live
-  // text deltas, tool activity badges, and pending permission requests
-  // with full fidelity.
-  // The old polling-based recovery (setInterval → fetchMessages) has been
-  // replaced by this subscribe-based approach.
-  useEffect(() => {
-    if (!activeChat) return;
-    if (!serverStreamingChats.has(activeChat)) return;
-    if (streamingChats.has(activeChat)) return; // we're already feeding events ourselves
-
-    const chatId = activeChat;
-    const since = streaming.get(chatId).lastEventSeq;
-    const controller = new AbortController();
-    let cancelled = false;
-
-    (async () => {
-      try {
-        const res = await fetch(
-          `/api/projects/${projectId}/chat/${chatId}/stream/subscribe?since=${since}`,
-          { signal: controller.signal },
-        );
-        if (!res.ok || !res.body) {
-          // 404 == no longer active — the polling effect will catch the new state
-          return;
-        }
-
-        // Initialise the streaming slice ONLY when this is a truly fresh
-        // subscribe (since=0). On a continuation — e.g. Fast Refresh or any
-        // remount that preserved the StreamingStateProvider — the slice
-        // already holds the content streamed by the previous subscribe and
-        // the server is replaying only events past `lastEventSeq`. Calling
-        // begin() here would wipe that pre-remount content and the user
-        // would only see the small tail that arrives after this subscribe
-        // opens. handleSubscribedEvent doesn't depend on `active` after the
-        // earlier stale-closure cleanup, so leaving the slice as-is is safe.
-        if (since === 0) {
-          streaming.begin(chatId);
-        }
-
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        let pendingId: number | null = null;
-
-        const dispatch = (rawData: string) => {
-          let parsed: Record<string, unknown>;
-          try {
-            parsed = JSON.parse(rawData);
-          } catch {
-            return;
-          }
-          if (parsed.type === '__subscribe_end__') {
-            cancelled = true;
-            controller.abort();
-            return;
-          }
-          handleSubscribedEvent(chatId, parsed);
-          if (pendingId != null) {
-            streaming.bumpSeq(chatId, pendingId);
-            pendingId = null;
-          }
-        };
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          if (cancelled) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          // Split on \r?\n so we tolerate CRLF normalization by intermediaries.
-          const lines = buffer.split(/\r?\n/);
-          buffer = lines.pop() ?? '';
-
-          for (const line of lines) {
-            if (line.startsWith('id: ')) {
-              const n = Number(line.slice(4));
-              if (!Number.isNaN(n)) pendingId = n;
-              continue;
-            }
-            if (line.startsWith('data: ')) {
-              dispatch(line.slice(6));
-              continue;
-            }
-            // blank line — frame boundary; nothing to do (dispatch already happened on data: line)
-          }
-        }
-      } catch (err) {
-        if ((err as Error).name !== 'AbortError') {
-          // eslint-disable-next-line no-console
-          console.warn('[ChatPanel] subscribe failed:', err);
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeChat, serverStreamingChats, streamingChats, projectId]);
+  const activeStreamState = useChatStreamSlice(list.activeChat);
 
   // Auto-scroll on new content — only when the user is already at the
   // bottom. When they're scrolled up, surface a "↓" pill instead of
@@ -513,487 +79,15 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
   const { isAtBottom, jumpToBottom } = useStickToBottom(
     scrollRef,
     [
-      messages,
+      list.messages,
       activeStreamState?.content,
       activeStreamState?.permissions.length ?? 0,
       activeStreamState?.toolActivities.length ?? 0,
     ],
-    activeChat,
+    list.activeChat,
   );
 
-  // Create new chat
-  const createChat = async () => {
-    try {
-      const lastMode =
-        typeof window !== 'undefined'
-          ? (window.localStorage.getItem(LAST_MODE_STORAGE_KEY) as 'local' | 'remote') ?? 'local'
-          : 'local';
-      const res = await fetch(`/api/projects/${projectId}/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: selectedModel, executionMode: lastMode }),
-      });
-      const chat = await res.json();
-      setChatList((prev) => [chat, ...prev]);
-      setActiveChat(chat.id);
-      setMessages([]);
-    } catch {
-      notify({ title: 'Error', message: 'Failed to create chat', color: 'red' });
-    }
-  };
-
-  // Switch chat
-  const switchChat = async (chatId: string) => {
-    setActiveChat(chatId);
-    const chat = chatList.find((c) => c.id === chatId);
-    if (chat?.model) {
-      setSelectedModel(chat.model);
-    }
-    await fetchMessages(chatId);
-  };
-
-  // Delete chat
-  const deleteChat = async (chatId: string) => {
-    try {
-      await fetch(`/api/projects/${projectId}/chat/${chatId}`, {
-        method: 'DELETE',
-      });
-      const updated = chatList.filter((c) => c.id !== chatId);
-      setChatList(updated);
-      if (activeChat === chatId) {
-        if (updated.length > 0) {
-          setActiveChat(updated[0].id);
-          await fetchMessages(updated[0].id);
-        } else {
-          setActiveChat(null);
-          setMessages([]);
-        }
-      }
-    } catch {
-      notify({ title: 'Error', message: 'Failed to delete chat', color: 'red' });
-    }
-  };
-
-  // Send message with streaming. Multiple invocations can be in flight in
-  // parallel — one per chat — and they share no mutable state besides the
-  // per-chat maps in React state.
-  //
-  // Attachment flow: any pending files are uploaded to disk *first* via
-  // POST /attachments, which returns durable metadata (id, url, size, …).
-  // That metadata is what we both (a) persist with the user message via the
-  // stream route's `attachments` field and (b) render as thumbnails in chat
-  // history. The raw `File` objects never reach the stream route — by the
-  // time we hit /stream, the bytes already live on disk and we just pass
-  // along URLs the agent (and the UI) can read back.
-  const sendMessage = async (
-    content: string,
-    pending: PendingAttachment[] = [],
-  ) => {
-    if (!activeChat) return;
-    // Per-chat guard: a chat that is already streaming (locally or on the
-    // server) cannot accept another turn until it finishes. Other chats are
-    // unaffected.
-    if (streamingChats.has(activeChat) || serverStreamingChats.has(activeChat)) return;
-
-    // Capture the chat id at the moment the user pressed Send. The user may
-    // switch chats while the stream is in flight, but every event from this
-    // particular agent turn belongs to *this* chat — never to whichever chat
-    // happens to be active when the event arrives.
-    const chatId = activeChat;
-
-    // Step 1: persist any attachments to disk before kicking off the stream.
-    // We do this synchronously (well, awaited) rather than fire-and-forget
-    // so the user message we save below already references real, fetchable
-    // URLs — there is no window where history shows broken thumbnails.
-    let uploaded: UploadedAttachment[] = [];
-    if (pending.length > 0) {
-      try {
-        const fd = new FormData();
-        for (const att of pending) {
-          fd.append('files', att.file, att.file.name);
-        }
-        const res = await fetch(
-          `/api/projects/${projectId}/chat/${chatId}/attachments`,
-          { method: 'POST', body: fd },
-        );
-        if (!res.ok) throw new Error('upload failed');
-        const data = await res.json();
-        uploaded = data.attachments ?? [];
-      } catch {
-        notify({
-          title: 'Upload failed',
-          message: 'Could not upload attachments — message not sent.',
-          color: 'red',
-        });
-        return;
-      }
-    }
-
-    // Optimistic add user message — include the uploaded metadata so the
-    // bubble shows thumbnails the moment it appears, before the stream even
-    // starts. The server saves the same JSON when it persists the user row.
-    const attachmentsJson = JSON.stringify(uploaded);
-    const userMsg: ChatMsg = {
-      id: `temp-${Date.now()}`,
-      chatId,
-      role: 'user',
-      content,
-      toolUses: '[]',
-      proposedChanges: '[]',
-      attachments: attachmentsJson,
-      timestamp: new Date().toISOString(),
-    };
-    if (activeChatRef.current === chatId) {
-      setMessages((prev) => [...prev, userMsg]);
-    }
-    setStreamingChats((prev) => withAdded(prev, chatId));
-    streaming.begin(chatId);
-
-    // Single place that knows how to interpret a parsed SSE event. Defined
-    // up-front so the buffered reader below can call it from one spot.
-    const handleEvent = (event: Record<string, unknown>) => {
-      if (event.type === 'session_started') {
-        // Remote mode: capture the sessionId for cancel/permission
-        streaming.setSessionId(chatId, event.sessionId as string);
-      } else if (event.type === 'text') {
-        streaming.appendText(chatId, event.text as string);
-      } else if (event.type === 'turn_break') {
-        // Server signals a multi-turn assistant response (text → tool →
-        // more text). Inject a paragraph break so the live bubble shows
-        // the same separation as the persisted row will after refetch.
-        streaming.appendTurnBreak(chatId);
-      } else if (event.type === 'preview') {
-        writePreviewToStore(chatId, (prev) =>
-          mergePreviewItem(
-            prev,
-            {
-              type: 'preview',
-              id: event.id as string,
-              contentType: event.contentType as 'html' | 'markdown' | 'mermaid' | 'svg' | 'diff',
-              content: event.content as string,
-              title: event.title as string | undefined,
-            },
-            Date.now(),
-          ),
-        );
-        setPreviewOpen(true);
-      } else if (handleBrowserEvent(event, chatId)) {
-        // handled
-      } else if (event.type === 'done') {
-        // The server now persists the assistant row BEFORE emitting
-        // `done`, so refetching /messages here is race-free and gives us
-        // the canonical row (with full tool_uses, tokens, etc.) — which
-        // the live `accumulated` text accumulator would not capture. End
-        // the slice synchronously so `active` flips false; defer the
-        // hard `clear` until after the fetch resolves so the streaming
-        // bubble doesn't flash off before the persisted row renders.
-        streaming.end(chatId);
-        if (activeChatRef.current === chatId) {
-          fetchMessages(chatId).finally(() => {
-            streaming.clear(chatId);
-          });
-        } else {
-          // Not the active chat — no bubble to flash. Drop immediately.
-          streaming.clear(chatId);
-        }
-        playSound('taskComplete');
-        fetchChats();
-      } else if (event.type === 'permission_request') {
-        playSound('notification');
-        // Works for both local format (toolUseId) and remote format (requestId)
-        const perm: PermissionRequest = {
-          toolUseId: (event.toolUseId ?? event.requestId) as string,
-          toolName: event.toolName as string,
-          displayName: (event.displayName ?? event.toolName) as string,
-          category: (event.category ?? 'execute') as PermissionRequest['category'],
-          input: event.input as Record<string, unknown>,
-          title: (event.title ?? event.reason ?? `${event.toolName}`) as string,
-          description: event.description as string | undefined,
-          status: 'pending',
-        };
-        streaming.addPermission(chatId, perm);
-      } else if (event.type === 'tool_use') {
-        const tool = event.tool as Record<string, unknown>;
-        const activity: ToolActivity = {
-          id: tool.id as string,
-          toolName: tool.toolName as string,
-          displayName: tool.displayName as string,
-          status: tool.status as ToolActivity['status'],
-          input: tool.input as Record<string, unknown>,
-        };
-        streaming.addToolActivity(chatId, activity);
-      } else if (event.type === 'error') {
-        const code = event.code as string | undefined;
-        if (code === 'DEVICE_OFFLINE') {
-          notify({
-            title: 'Device offline',
-            message: 'The device is not connected. Switch to Local mode or wait for device.',
-            color: 'orange',
-          });
-        } else {
-          notify({
-            title: 'AI Error',
-            message: event.message as string,
-            color: 'red',
-          });
-        }
-      }
-    };
-
-    // Abort controller for this turn — the Stop button calls
-    // `controller.abort()` to tear the streaming reader down and the
-    // separate /cancel POST aborts the server-side SDK query (local) or
-    // the device session (remote). We register before the fetch starts so
-    // a stop click that lands during the upload phase still cleans up.
-    const abortController = new AbortController();
-    abortControllersRef.current.set(chatId, abortController);
-
-    try {
-      const res = await fetch(
-        `/api/projects/${projectId}/chat/${chatId}/stream`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          // The stream route persists `attachments` on the user message and
-          // also weaves the file paths into the prompt so Claude Code's
-          // Read tool can inspect them.
-          body: JSON.stringify({
-            message: content,
-            attachments: attachmentsJson,
-            executionMode: chatList.find((c) => c.id === chatId)?.executionMode ?? 'local',
-          }),
-          signal: abortController.signal,
-        },
-      );
-
-      if (!res.ok || !res.body) {
-        throw new Error('Stream request failed');
-      }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      // Buffered SSE parsing. The network can split a chunk anywhere — even
-      // mid-token inside a JSON payload — so we accumulate bytes and only
-      // process complete lines (those terminated by `\n`). The previous
-      // implementation called `JSON.parse` on partial lines, which silently
-      // dropped any text delta unlucky enough to straddle a chunk boundary.
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-
-        const lines = buffer.split('\n');
-        // The last element may be an incomplete line — keep it in the buffer
-        // until the next chunk arrives.
-        buffer = lines.pop() ?? '';
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          try {
-            handleEvent(JSON.parse(line.slice(6)));
-          } catch {
-            // Truly malformed JSON — should not happen now that lines are
-            // guaranteed complete, but stay defensive.
-          }
-        }
-      }
-
-      // Flush any final complete event left in the buffer (some servers
-      // omit the trailing newline on the very last event).
-      if (buffer.startsWith('data: ')) {
-        try {
-          handleEvent(JSON.parse(buffer.slice(6)));
-        } catch {
-          // ignore
-        }
-      }
-    } catch (err) {
-      // AbortError is the expected outcome of the Stop button — don't
-      // surface it as a failure toast. Anything else is a real network
-      // / server error worth telling the user about.
-      const name = (err as { name?: string } | null)?.name;
-      if (name !== 'AbortError') {
-        notify({
-          title: 'Error',
-          message: 'Failed to get AI response',
-          color: 'red',
-        });
-      }
-    } finally {
-      // Drop the controller from the ref FIRST so a late stopChat click
-      // (between the SSE reader exit and this finally) doesn't try to
-      // abort an already-finished request and inadvertently flag the
-      // chat as still cancelling.
-      const cur = abortControllersRef.current.get(chatId);
-      if (cur === abortController) abortControllersRef.current.delete(chatId);
-      setCancellingChats((prev) => withRemoved(prev, chatId));
-      setStreamingChats((prev) => withRemoved(prev, chatId));
-      streaming.end(chatId);
-    }
-  };
-
-  // Stop an in-flight turn for the active chat. Two parallel actions:
-  //   1. Abort the local fetch reader so the streaming UI tears down
-  //      immediately (the server-side agent might still flush a final
-  //      `done` event, which is fine — it lands on a controller that
-  //      no longer has a listener).
-  //   2. POST /cancel so the server actually stops the SDK query (local)
-  //      or forwards CLAUDE_CANCEL to the device (remote). The endpoint
-  //      decides which path to take based on the chat's executionMode.
-  // Either side succeeding is enough to surface the right UI state.
-  const stopChat = useCallback(
-    async (chatId: string) => {
-      if (cancellingChats.has(chatId)) return;
-      setCancellingChats((prev) => withAdded(prev, chatId));
-
-      // (1) Local fetch teardown — abort BEFORE the network call so a
-      // slow /cancel response doesn't keep the bubble looking active.
-      const controller = abortControllersRef.current.get(chatId);
-      if (controller) {
-        try {
-          controller.abort();
-        } catch {
-          // already aborted
-        }
-        abortControllersRef.current.delete(chatId);
-      }
-
-      // (2) Tell the server to stop. Best-effort — even if this fails
-      // (offline, route 500s, etc.) the client side has already been
-      // torn down by step 1 and the chat will return to an idle state
-      // when the SSE reader exits.
-      try {
-        const sessionId = streaming.get(chatId).sessionId;
-        await fetch(
-          `/api/projects/${projectId}/chat/${chatId}/cancel`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(sessionId ? { sessionId } : {}),
-          },
-        );
-      } catch {
-        // Swallow — the local teardown already happened. We deliberately
-        // don't toast here: the user's intent was "stop", so any visible
-        // "stopping failed" message would be more confusing than helpful.
-      }
-
-      // The client-side fetch was torn down in step (1), so the original
-      // sendMessage SSE reader will never see the server's `done` event
-      // — and therefore never refetches /messages to swap the live bubble
-      // for the persisted assistant row. Do it explicitly here. The
-      // server's catch → persist → finally chain runs after the
-      // AbortController flip, so we wait briefly to give the row a
-      // chance to land in SQLite. A second pass at ~1.6s covers the
-      // remote path (which takes an extra Socket.io round-trip) and any
-      // case where the first pass raced ahead of the insert.
-      setTimeout(() => {
-        fetchMessages(chatId).finally(() => {
-          streaming.clear(chatId);
-        });
-      }, 600);
-      setTimeout(() => {
-        fetchMessages(chatId);
-      }, 1600);
-
-      // Local-streamed turns: the sendMessage `finally` will clear the
-      // `cancellingChats` entry as part of its own cleanup. Server-side
-      // / reattach turns (where sendMessage isn't running in this tab):
-      // clear it once the SSE reader sees `done`/error. Worst case the
-      // chat-list poll resyncs `serverStreamingChats` and the spinner
-      // disappears — but `cancellingChats` is purely local UX state, so
-      // also drop it ourselves on a short delay so the button doesn't
-      // stay stuck if no SSE event ever arrives (e.g. journal already
-      // ended between snapshot and our cancel landing).
-      setTimeout(() => {
-        setCancellingChats((prev) => withRemoved(prev, chatId));
-      }, 4000);
-    },
-    [cancellingChats, projectId, streaming, fetchMessages],
-  );
-
-  // Handle permission approval — routes to the correct endpoint based on mode
-  const approvePermission = async (toolUseId: string) => {
-    if (!activeChat) return;
-    setRespondingTo(toolUseId);
-    const chatId = activeChat;
-    const sessionId = streaming.get(chatId).sessionId;
-
-    try {
-      if (sessionId) {
-        // Remote mode: use /claude/permission with sessionId
-        await fetch(
-          `/api/projects/${projectId}/claude/permission`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sessionId, requestId: toolUseId, decision: 'allow' }),
-          },
-        );
-      } else {
-        // Local mode: use /chat/[chatId]/permission with toolUseId
-        await fetch(
-          `/api/projects/${projectId}/chat/${chatId}/permission`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ toolUseId, decision: 'allow' }),
-          },
-        );
-      }
-
-      streaming.updatePermission(chatId, toolUseId, 'approved');
-    } catch {
-      notify({
-        title: 'Error',
-        message: 'Failed to send permission decision',
-        color: 'red',
-      });
-    } finally {
-      setRespondingTo(null);
-    }
-  };
-
-  const denyPermission = async (toolUseId: string) => {
-    if (!activeChat) return;
-    const chatId = activeChat;
-    const sessionId = streaming.get(chatId).sessionId;
-
-    try {
-      if (sessionId) {
-        await fetch(
-          `/api/projects/${projectId}/claude/permission`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sessionId, requestId: toolUseId, decision: 'deny' }),
-          },
-        );
-      } else {
-        await fetch(
-          `/api/projects/${projectId}/chat/${chatId}/permission`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ toolUseId, decision: 'deny' }),
-          },
-        );
-      }
-
-      streaming.updatePermission(chatId, toolUseId, 'denied');
-    } catch {
-      notify({
-        title: 'Error',
-        message: 'Failed to send permission decision',
-        color: 'red',
-      });
-    }
-  };
-
-  if (loading) {
+  if (list.loading) {
     return (
       <Center h={400}>
         <Loader color="brand" type="dots" size="lg" />
@@ -1001,10 +95,10 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
     );
   }
 
-  const activeChatData = chatList.find((c) => c.id === activeChat);
+  const activeChatData = list.chatList.find((c) => c.id === list.activeChat);
   // Active-chat-scoped views — derived once so the JSX stays readable.
-  const activeIsLocallyStreaming = activeChat ? streamingChats.has(activeChat) : false;
-  const activeIsServerStreaming = activeChat ? serverStreamingChats.has(activeChat) : false;
+  const activeIsLocallyStreaming = list.activeChat ? stream.streamingChats.has(list.activeChat) : false;
+  const activeIsServerStreaming = list.activeChat ? list.serverStreamingChats.has(list.activeChat) : false;
   const activeShowsLiveTurn = activeIsLocallyStreaming || activeIsServerStreaming;
   // Disable input only on the chat that is busy; siblings stay usable.
   const inputDisabled = activeShowsLiveTurn;
@@ -1021,12 +115,12 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
       }}
     >
       <ChatList
-        items={chatList}
-        activeId={activeChat}
-        serverStreaming={serverStreamingChats}
-        onSelect={switchChat}
-        onDelete={deleteChat}
-        onCreate={createChat}
+        items={list.chatList}
+        activeId={list.activeChat}
+        serverStreaming={list.serverStreamingChats}
+        onSelect={list.switchChat}
+        onDelete={list.deleteChat}
+        onCreate={list.createChat}
       />
 
       {/* Chat-area + preview-dock row. The OUTER box holds the rail too so
@@ -1071,25 +165,25 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
             title={activeChatData.title}
             estimatedCost={activeChatData.estimatedCost}
             executionMode={activeChatData.executionMode ?? 'local'}
-            selectedModel={selectedModel}
+            selectedModel={list.selectedModel}
             isStreaming={activeShowsLiveTurn}
-            isCancelling={!!activeChat && cancellingChats.has(activeChat)}
+            isCancelling={!!list.activeChat && stream.cancellingChats.has(list.activeChat)}
             deviceId={deviceId}
             deviceConnected={deviceConnected}
-            onStop={() => activeChat && stopChat(activeChat)}
+            onStop={() => list.activeChat && stream.stopChat(list.activeChat)}
             onModelChange={(val) => {
-              setSelectedModel(val);
+              list.setSelectedModel(val);
               if (typeof window !== 'undefined') {
                 window.localStorage.setItem(LAST_MODEL_STORAGE_KEY, val);
               }
-              if (activeChat) {
-                fetch(`/api/projects/${projectId}/chat/${activeChat}`, {
+              if (list.activeChat) {
+                fetch(`/api/projects/${projectId}/chat/${list.activeChat}`, {
                   method: 'PATCH',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ model: val }),
                 });
-                setChatList((prev) =>
-                  prev.map((c) => (c.id === activeChat ? { ...c, model: val } : c)),
+                list.setChatList((prev) =>
+                  prev.map((c) => (c.id === list.activeChat ? { ...c, model: val } : c)),
                 );
               }
             }}
@@ -1097,14 +191,16 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
               if (typeof window !== 'undefined') {
                 window.localStorage.setItem(LAST_MODE_STORAGE_KEY, mode);
               }
-              if (activeChat) {
-                fetch(`/api/projects/${projectId}/chat/${activeChat}`, {
+              if (list.activeChat) {
+                fetch(`/api/projects/${projectId}/chat/${list.activeChat}`, {
                   method: 'PATCH',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ executionMode: mode }),
                 });
-                setChatList((prev) =>
-                  prev.map((c) => (c.id === activeChat ? { ...c, executionMode: mode } : c)),
+                list.setChatList((prev) =>
+                  prev.map((c) =>
+                    c.id === list.activeChat ? { ...c, executionMode: mode } : c,
+                  ),
                 );
               }
             }}
@@ -1128,7 +224,7 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
           viewportRef={scrollRef}
         >
           <Stack gap={0} px="md" py="sm">
-            {!activeChat ? (
+            {!list.activeChat ? (
               <Center h={300}>
                 <Stack align="center" gap="sm">
                   <IconSparkles size={48} style={{ opacity: 0.15 }} />
@@ -1140,13 +236,13 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
                     variant="light"
                     color="brand"
                     leftSection={<IconPlus size={14} />}
-                    onClick={createChat}
+                    onClick={list.createChat}
                   >
                     New Chat
                   </Button>
                 </Stack>
               </Center>
-            ) : messages.length === 0 && !activeShowsLiveTurn ? (
+            ) : list.messages.length === 0 && !activeShowsLiveTurn ? (
               <Center h={300}>
                 <Stack align="center" gap="sm">
                   <IconSparkles size={48} style={{ opacity: 0.15 }} />
@@ -1157,17 +253,17 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
               </Center>
             ) : (
               <>
-                {messages.map((msg) => (
+                {list.messages.map((msg) => (
                   <ChatMessage key={msg.id} message={msg} />
                 ))}
 
-                {activeChat && (
+                {list.activeChat && (
                   <StreamingBubble
-                    chatId={activeChat}
+                    chatId={list.activeChat}
                     serverStreaming={activeIsServerStreaming}
-                    respondingToToolUseId={respondingTo}
-                    onApprove={approvePermission}
-                    onDeny={denyPermission}
+                    respondingToToolUseId={stream.respondingTo}
+                    onApprove={stream.approvePermission}
+                    onDeny={stream.denyPermission}
                   />
                 )}
               </>
@@ -1223,14 +319,14 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
         </Box>
 
         {/* Input */}
-        {activeChat && (
-          <ChatInput onSend={sendMessage} disabled={inputDisabled} />
+        {list.activeChat && (
+          <ChatInput onSend={stream.sendMessage} disabled={inputDisabled} />
         )}
       </Box>
 
-        {activeChat && (
+        {list.activeChat && (
           <PreviewHost
-            chatId={activeChat}
+            chatId={list.activeChat}
             containerRef={containerRef}
             open={previewOpen}
             expanded={previewExpanded}
@@ -1239,9 +335,9 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
           />
         )}
       </Box>
-      {activeChat && (
+      {list.activeChat && (
         <PreviewRailHost
-          chatId={activeChat}
+          chatId={list.activeChat}
           panelOpen={previewOpen}
           onSelect={() => setPreviewOpen(true)}
           onTogglePanel={() => setPreviewOpen((o) => !o)}
