@@ -10,7 +10,6 @@ import {
 } from './preview-store';
 import {
   Box,
-  Group,
   Stack,
   Text,
   Button,
@@ -43,7 +42,8 @@ interface UploadedAttachment {
   url: string;
 }
 import { ChatHeader, MODEL_OPTIONS } from './ChatHeader';
-import { ToolApprovalCard, ToolActivityBadge, type PermissionRequest, type ToolActivity } from './ToolApprovalCard';
+import { type PermissionRequest, type ToolActivity } from './ToolApprovalCard';
+import { StreamingBubble } from './StreamingBubble';
 import { PreviewPanel } from './PreviewPanel';
 import { PreviewRail } from './PreviewRail';
 import { ResizeHandle } from './ResizeHandle';
@@ -1038,9 +1038,6 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
 
   const activeChatData = chatList.find((c) => c.id === activeChat);
   // Active-chat-scoped views — derived once so the JSX stays readable.
-  const activeStreamingContent = activeStreamState?.content || undefined;
-  const activeToolActivities = activeStreamState?.toolActivities ?? [];
-  const activePermissions = activeStreamState?.permissions ?? [];
   const activeIsLocallyStreaming = activeChat ? streamingChats.has(activeChat) : false;
   const activeIsServerStreaming = activeChat ? serverStreamingChats.has(activeChat) : false;
   const activeShowsLiveTurn = activeIsLocallyStreaming || activeIsServerStreaming;
@@ -1199,65 +1196,14 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
                   <ChatMessage key={msg.id} message={msg} />
                 ))}
 
-                {/* Live streaming section — only render on the chat that is
-                    actually streaming. Otherwise switching chats mid-turn
-                    would leak the assistant's typing indicator into the wrong
-                    conversation. Also rendered when the server reports an
-                    in-flight turn that this browser isn't driving (e.g.
-                    after a page refresh) so the user knows work is still
-                    happening. */}
-                {activeShowsLiveTurn && (
-                  <>
-                    {/* Tool Activity (inline during streaming) */}
-                    {activeToolActivities.length > 0 && (
-                      <Box px="md" py={4}>
-                        {activeToolActivities.map((ta) => (
-                          <ToolActivityBadge key={ta.id} activity={ta} />
-                        ))}
-                      </Box>
-                    )}
-
-                    {activeStreamingContent ? (
-                      <ChatMessage
-                        message={{
-                          id: 'streaming',
-                          chatId: activeChat!,
-                          role: 'assistant',
-                          content: activeStreamingContent,
-                          toolUses: '[]',
-                          proposedChanges: '[]',
-                          attachments: '[]',
-                          timestamp: new Date().toISOString(),
-                        }}
-                        isStreaming
-                      />
-                    ) : (
-                      <Box px="md" py="sm">
-                        <Group gap="xs">
-                          <Loader size={14} color="brand" type="dots" />
-                          <Text size="xs" c="dimmed" fs="italic">
-                            {activeToolActivities.length > 0
-                              ? 'Working...'
-                              : 'Thinking...'}
-                          </Text>
-                        </Group>
-                      </Box>
-                    )}
-                  </>
-                )}
-                {/* Permission Requests */}
-                {activePermissions.length > 0 && (
-                  <Box px="xs" py={4}>
-                    {activePermissions.map((perm) => (
-                      <ToolApprovalCard
-                        key={perm.toolUseId}
-                        permission={perm}
-                        onApprove={approvePermission}
-                        onDeny={denyPermission}
-                        loading={respondingTo === perm.toolUseId}
-                      />
-                    ))}
-                  </Box>
+                {activeChat && (
+                  <StreamingBubble
+                    chatId={activeChat}
+                    serverStreaming={activeIsServerStreaming}
+                    respondingToToolUseId={respondingTo}
+                    onApprove={approvePermission}
+                    onDeny={denyPermission}
+                  />
                 )}
               </>
             )}
