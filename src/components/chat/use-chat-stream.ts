@@ -1,7 +1,10 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { useStreamingState } from './streaming-state';
+// Module namespace import keeps every existing call site (`streaming.begin`,
+// `streaming.appendText`, …) working unchanged. The only API name that
+// differs from the deleted shim is `.get` → `.readSlice`, fixed below.
+import * as streaming from './streaming-store';
 import {
   writePreview as writePreviewToStore,
 } from './preview-store';
@@ -96,8 +99,6 @@ export function useChatStream(args: UseChatStreamArgs) {
     activeChatRef.current = activeChat;
   }, [activeChat]);
 
-  const streaming = useStreamingState();
-
   // Shared dispatcher for the three BROWSER_* events emitted by the agent's
   // browser MCP. Returns true when the event was handled (so the caller can
   // early-return and skip the rest of its event-handler chain).
@@ -164,11 +165,8 @@ export function useChatStream(args: UseChatStreamArgs) {
       if (event.type === 'text') {
         // The reattach effect calls `streaming.begin(chatId)` once before
         // pumping events into us, so by the time we get here the slice is
-        // already active. We deliberately do NOT read `streaming.get` —
-        // this callback's `streaming` is captured at mount and `get` is a
-        // closure over a stale `byChat`, which would always return
-        // EMPTY_STATE and trigger a content-wiping `begin()` on every
-        // delta.
+        // already active. We deliberately do NOT call `begin()` again per
+        // text delta — that would wipe accumulated content.
         streaming.appendText(chatId, event.text as string);
         return;
       }
@@ -245,7 +243,7 @@ export function useChatStream(args: UseChatStreamArgs) {
         streaming.end(chatId);
       }
     },
-    [streaming, fetchMessages, fetchChats, handleBrowserEvent, openPreview],
+    [fetchMessages, fetchChats, handleBrowserEvent, openPreview],
   );
 
   // ─── Reattach to a server-side live stream ──────────────────────────────
@@ -263,7 +261,7 @@ export function useChatStream(args: UseChatStreamArgs) {
     if (streamingChats.has(activeChat)) return; // we're already feeding events ourselves
 
     const chatId = activeChat;
-    const since = streaming.get(chatId).lastEventSeq;
+    const since = streaming.readSlice(chatId).lastEventSeq;
     const controller = new AbortController();
     let cancelled = false;
 
@@ -642,7 +640,7 @@ export function useChatStream(args: UseChatStreamArgs) {
       // torn down by step 1 and the chat will return to an idle state
       // when the SSE reader exits.
       try {
-        const sessionId = streaming.get(chatId).sessionId;
+        const sessionId = streaming.readSlice(chatId).sessionId;
         await fetch(`/api/projects/${projectId}/chat/${chatId}/cancel`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -685,7 +683,7 @@ export function useChatStream(args: UseChatStreamArgs) {
         setCancellingChats((prev) => withRemoved(prev, chatId));
       }, 4000);
     },
-    [cancellingChats, projectId, streaming, fetchMessages],
+    [cancellingChats, projectId, fetchMessages],
   );
 
   // Handle permission approval — routes to the correct endpoint based on mode
@@ -693,7 +691,7 @@ export function useChatStream(args: UseChatStreamArgs) {
     if (!activeChat) return;
     setRespondingTo(toolUseId);
     const chatId = activeChat;
-    const sessionId = streaming.get(chatId).sessionId;
+    const sessionId = streaming.readSlice(chatId).sessionId;
 
     try {
       if (sessionId) {
@@ -727,7 +725,7 @@ export function useChatStream(args: UseChatStreamArgs) {
   const denyPermission = async (toolUseId: string) => {
     if (!activeChat) return;
     const chatId = activeChat;
-    const sessionId = streaming.get(chatId).sessionId;
+    const sessionId = streaming.readSlice(chatId).sessionId;
 
     try {
       if (sessionId) {
