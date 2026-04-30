@@ -17,6 +17,8 @@ import { usePreviewSlice, writePreview } from './preview-store';
 
 interface PreviewHostProps {
   chatId: string;
+  /** Forwarded to <BrowserPreview> for one-shot snapshot fetches. */
+  projectId?: string;
   containerRef: RefObject<HTMLDivElement | null>;
   open: boolean;
   expanded: boolean;
@@ -29,6 +31,7 @@ interface PreviewHostProps {
 
 export function PreviewHost({
   chatId,
+  projectId,
   containerRef,
   open,
   expanded,
@@ -92,6 +95,7 @@ export function PreviewHost({
           key={activeItem.id}
           item={activeItem}
           chatId={chatId}
+          projectId={projectId}
           isExpanded={expanded}
           onClosePanel={onClose}
           onToggleExpand={onToggleExpand}

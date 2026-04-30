@@ -197,6 +197,7 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
           {list.activeChat && (
             <PreviewHost
               chatId={list.activeChat}
+              projectId={projectId}
               containerRef={containerRef}
               open={previewOpen}
               expanded={previewExpanded}
@@ -222,6 +223,7 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
         <BrowserFullscreenModal
           opened={browserFullscreenOpen}
           chatId={list.activeChat}
+          projectId={projectId}
           title={activeChatData?.title}
           inputDisabled={inputDisabled}
           onSend={stream.sendMessage}

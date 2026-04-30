@@ -147,7 +147,16 @@ export type AgentCommand =
       sessionId: string;
       requestId: string;
       decision: 'allow' | 'deny';
-    };
+    }
+  // ─── Browser one-shot snapshot ─────────────────────────
+  // Asks the agent to take a fresh JPEG screenshot of the existing
+  // BrowserContext for this chat and reply via BROWSER_SNAPSHOT_RESULT.
+  // The request is intentionally read-only — it never CREATES a context;
+  // if no context exists for this chat, the result reports an error.
+  // Used by the dashboard to repopulate the browser preview after a page
+  // refresh (the live screencast only emits frames when the page renders
+  // something new, so a static page would otherwise stay blank).
+  | { type: 'BROWSER_SNAPSHOT_REQUEST'; id: string; chatId: string };
 
 // ─── Agent → Dashboard Events ─────────────────────────────
 export type AgentEvent =
@@ -290,6 +299,29 @@ export type AgentEvent =
       height: number;
       /** Current page URL — useful for the panel header. */
       url: string;
+    }
+  | {
+      // Reply to BROWSER_SNAPSHOT_REQUEST. Routed via the standard
+      // `pendingCommands` request/response correlation in agent-manager.ts
+      // (matched by `requestId`), NOT through the chat-stream SSE relay —
+      // the dashboard wants this even when no chat stream is active.
+      type: 'BROWSER_SNAPSHOT_RESULT';
+      requestId: string;
+      /** Present iff a BrowserContext exists for the requested chat AND
+       *  the page.screenshot call succeeded. */
+      frame?: {
+        /** Base64-encoded JPEG bytes (no data: prefix). */
+        frameB64: string;
+        width: number;
+        height: number;
+        url: string;
+        /** Wall-clock ms when the snapshot was captured. */
+        timestamp: number;
+      };
+      /** Set when no context exists for this chat, or the screenshot
+       *  raised. Either way the dashboard should leave the panel in
+       *  its "waiting for first frame" state. */
+      error?: string;
     };
 
 // ─── Response wrapper (for command → response flow) ───────

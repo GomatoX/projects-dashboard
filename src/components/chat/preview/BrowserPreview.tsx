@@ -4,14 +4,29 @@ import { IconLock, IconWorld } from '@tabler/icons-react';
 import {
   type BrowserFrame,
   getLatestFrame,
+  pushFrame,
   subscribe,
 } from '@/lib/ai/browser-frame-store';
 
 interface Props {
   chatId: string;
+  /**
+   * When set, on mount (and on chatId change) the preview will fetch a
+   * one-shot screenshot from the agent if the local frame store is empty.
+   * Repopulates the panel after a page refresh — the live screencast only
+   * fires frames when the page renders something new, so a static page
+   * would otherwise stay blank until the next interaction.
+   *
+   * Omit this prop in contexts that DON'T own the snapshot fetch (e.g. the
+   * popout window, which receives frames via the BroadcastChannel from the
+   * main window). Firing twice would just be a wasted round-trip but is
+   * otherwise harmless — the agent's captureSnapshot() doesn't `touch()`
+   * the context so it has no side effect on idle TTL.
+   */
+  projectId?: string;
 }
 
-export function BrowserPreview({ chatId }: Props) {
+export function BrowserPreview({ chatId, projectId }: Props) {
   // Initialise with whatever frame is already in the store for this chat.
   // When chatId changes React remounts (the parent keys on item.id) so the
   // initialiser always fires with the correct chatId.
@@ -23,6 +38,38 @@ export function BrowserPreview({ chatId }: Props) {
     // Subscribe to live frames pushed after mount.
     return subscribe(chatId, (f) => setFrame(f));
   }, [chatId]);
+
+  // Fetch a one-shot snapshot when we mount with no frame already cached.
+  // We deliberately read getLatestFrame() at fire-time rather than gating
+  // on the `frame` state: a previous render may have already kicked off
+  // the request and a fresh BROWSER_FRAME may have just landed.
+  useEffect(() => {
+    if (!projectId) return;
+    if (getLatestFrame(chatId)) return;
+
+    const ac = new AbortController();
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/projects/${projectId}/chat/${chatId}/browser/snapshot`,
+          { method: 'POST', signal: ac.signal },
+        );
+        if (!res.ok) return; // 503/504/etc. — leave the "waiting…" state alone.
+        const body = (await res.json()) as
+          | { ok: true; frame: BrowserFrame }
+          | { ok: false; reason: string; error?: string };
+        if (body.ok && body.frame) {
+          // Push through the store so any other subscriber (e.g. the
+          // popout view bridged over BroadcastChannel) sees the frame too.
+          pushFrame(chatId, body.frame);
+        }
+      } catch {
+        // AbortError on unmount, network error, etc. — silently ignore;
+        // the next live BROWSER_FRAME (if any) will repopulate.
+      }
+    })();
+    return () => ac.abort();
+  }, [chatId, projectId]);
 
   if (!frame) {
     return (

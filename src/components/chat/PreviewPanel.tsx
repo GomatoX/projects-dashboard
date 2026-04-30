@@ -19,6 +19,10 @@ import { SvgPreview } from './preview/SvgPreview';
 interface PreviewPanelProps {
   item: PreviewItem;
   chatId: string;
+  /** Browser-only: project this chat belongs to. Forwarded to
+   *  <BrowserPreview> so it can request a one-shot snapshot from the
+   *  agent on mount/refresh when the local frame store is empty. */
+  projectId?: string;
   isExpanded: boolean;
   /** Close the entire panel (rail stays visible if items.length > 0). */
   onClosePanel: () => void;
@@ -44,6 +48,7 @@ const CONTENT_TYPE_LABELS: Record<string, string> = {
 export function PreviewPanel({
   item,
   chatId,
+  projectId,
   isExpanded,
   onClosePanel,
   onToggleExpand,
@@ -183,7 +188,7 @@ export function PreviewPanel({
           (browserPoppedOut ? (
             <BrowserPoppedOutPlaceholder onFocus={onOpenBrowserPopout} />
           ) : (
-            <BrowserPreview chatId={chatId} />
+            <BrowserPreview chatId={chatId} projectId={projectId} />
           ))}
       </Box>
     </Box>

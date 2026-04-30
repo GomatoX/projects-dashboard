@@ -66,6 +66,12 @@ export type AgentCommand = {
     projectPath: string;
     staged: boolean;
 } | {
+    type: 'GIT_DIFF_FILE';
+    id: string;
+    projectPath: string;
+    path: string;
+    mode: 'unstaged' | 'staged' | 'untracked';
+} | {
     type: 'GIT_BRANCHES';
     id: string;
     projectPath: string;
@@ -170,6 +176,18 @@ export type AgentCommand = {
     maxTurns?: number;
     claudePath?: string;
     permissions: ClaudePermissionConfig;
+    /** When set, agent mounts the PM2 MCP scoped to this pm2Name. */
+    pm2Name?: string;
+    /**
+     * When true (and the agent has Playwright installed), agent mounts
+     * the Browser MCP. Default is `false` so older dashboards keep the
+     * pre-MCP behavior. Tighter than always-on so a stale dashboard
+     * never gets surprise tools.
+     */
+    enableBrowserMcp?: boolean;
+    attachments?: ClaudeAttachment[];
+    chatId?: string;
+    projectId?: string;
 } | {
     type: 'CLAUDE_CANCEL';
     id: string;
@@ -180,6 +198,10 @@ export type AgentCommand = {
     sessionId: string;
     requestId: string;
     decision: 'allow' | 'deny';
+} | {
+    type: 'BROWSER_SNAPSHOT_REQUEST';
+    id: string;
+    chatId: string;
 };
 export type AgentEvent = {
     type: 'AGENT_HELLO';
@@ -251,6 +273,14 @@ export type AgentEvent = {
     requestId: string;
     diff: string;
 } | {
+    type: 'GIT_DIFF_FILE_RESULT';
+    requestId: string;
+    path: string;
+    original: string;
+    modified: string;
+    isNew: boolean;
+    isDeleted: boolean;
+} | {
     type: 'GIT_BRANCHES_RESULT';
     requestId: string;
     branches: GitBranch[];
@@ -320,6 +350,48 @@ export type AgentEvent = {
     sessionId: string;
     requestId: string;
     message: string;
+} | {
+    type: 'BROWSER_CONTEXT_OPENED';
+    chatId: string;
+    sessionId: string;
+    /** Initial URL the context was created at, or `'about:blank'`. */
+    url: string;
+} | {
+    type: 'BROWSER_CONTEXT_CLOSED';
+    chatId: string;
+    /** 'idle' | 'evicted' | 'shutdown' | 'explicit' — for diagnostics only. */
+    reason: 'idle' | 'evicted' | 'shutdown' | 'explicit';
+} | {
+    type: 'BROWSER_FRAME';
+    chatId: string;
+    sessionId: string;
+    /** Base64-encoded JPEG bytes (no data: prefix). */
+    frameB64: string;
+    /** Wall-clock ms when the agent received the frame from CDP. */
+    timestamp: number;
+    /** Width/height of the JPEG in pixels (the agent caps these). */
+    width: number;
+    height: number;
+    /** Current page URL — useful for the panel header. */
+    url: string;
+} | {
+    type: 'BROWSER_SNAPSHOT_RESULT';
+    requestId: string;
+    /** Present iff a BrowserContext exists for the requested chat AND
+     *  the page.screenshot call succeeded. */
+    frame?: {
+        /** Base64-encoded JPEG bytes (no data: prefix). */
+        frameB64: string;
+        width: number;
+        height: number;
+        url: string;
+        /** Wall-clock ms when the snapshot was captured. */
+        timestamp: number;
+    };
+    /** Set when no context exists for this chat, or the screenshot
+     *  raised. Either way the dashboard should leave the panel in
+     *  its "waiting for first frame" state. */
+    error?: string;
 };
 export interface CommandResponse<T = unknown> {
     requestId: string;
@@ -432,6 +504,24 @@ export interface GitLogEntry {
     refs: string;
 }
 export type ClaudePermissionMode = 'bypass' | 'readOnly' | 'interactive';
+/**
+ * Attachment metadata sent with CLAUDE_QUERY to the device. The bytes
+ * themselves stay on the dashboard's disk — the agent downloads them on
+ * demand from `/api/projects/{projectId}/chat/{chatId}/attachments/{filename}`.
+ *
+ * `filename` is the on-disk name (nanoid-prefixed, safe for path joins);
+ * `name` is the original user-facing name we surface in the prompt. The
+ * `placeholder` is the literal token (`__ATTACHMENT_0__`, etc.) that the
+ * agent must replace with the device-local absolute path before invoking
+ * the SDK. Keeping the placeholder explicit here means the dashboard owns
+ * the index/name pairing and the agent doesn't have to guess.
+ */
+export interface ClaudeAttachment {
+    filename: string;
+    name: string;
+    type: string;
+    placeholder: string;
+}
 export interface ClaudePermissionConfig {
     mode: ClaudePermissionMode;
     /** Tool names that auto-allow even in interactive mode. */

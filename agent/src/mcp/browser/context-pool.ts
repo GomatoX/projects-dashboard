@@ -283,6 +283,52 @@ export function preloadStateForNext(chatId: string, state: unknown): void {
   preloadedStates.set(chatId, state);
 }
 
+/**
+ * Take a one-shot JPEG screenshot of the existing context for this chat,
+ * if one exists. Does NOT create a context — the dashboard uses this to
+ * repopulate the preview after a page refresh, and "open the browser
+ * silently because the user reloaded a tab" would be surprising.
+ *
+ * Returns `undefined` when no context exists for `chatId`. Throws if the
+ * screenshot itself fails (caller should treat as transient and surface
+ * the error to the user).
+ *
+ * Mirrors the JPEG quality used by the screencast (60) so the still and
+ * the live frames look the same; quality is well below `page.screenshot`'s
+ * default 80 to keep payload size in the same ballpark as a screencast
+ * frame (~50 KB, not ~150 KB).
+ */
+export async function captureSnapshot(chatId: string): Promise<
+  | {
+      frameB64: string;
+      width: number;
+      height: number;
+      url: string;
+      timestamp: number;
+    }
+  | undefined
+> {
+  const pooled = contexts.get(chatId);
+  if (!pooled) return undefined;
+  // Don't `touch()` — this is a passive read; a refresh-driven snapshot
+  // shouldn't extend the idle TTL of an otherwise-abandoned context.
+  const buf = await pooled.page.screenshot({
+    type: 'jpeg',
+    quality: 60,
+    fullPage: false,
+  });
+  // Read viewport from the page; CDP reports device dimensions which are
+  // the same here since we don't override deviceScaleFactor.
+  const vp = pooled.page.viewportSize() ?? { width: 1280, height: 800 };
+  return {
+    frameB64: buf.toString('base64'),
+    width: vp.width,
+    height: vp.height,
+    url: pooled.page.url(),
+    timestamp: Date.now(),
+  };
+}
+
 // ─── Test seam ─────────────────────────────────────────────
 /**
  * Internal — exposed only for the smoke script. Read-only intent:

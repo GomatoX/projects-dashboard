@@ -22,4 +22,5 @@ export {
   setAgentSocket,
   closeContext,
   closeAll,
+  captureSnapshot,
 } from './context-pool.js';

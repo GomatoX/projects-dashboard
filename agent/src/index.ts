@@ -46,7 +46,11 @@ import {
   cancelAllClaudeSessions,
   handleClaudePermissionResponse,
 } from './handlers/claude.js';
-import { setAgentSocket, closeAll as closeAllBrowser } from './mcp/browser/index.js';
+import {
+  setAgentSocket,
+  closeAll as closeAllBrowser,
+  captureSnapshot as captureBrowserSnapshot,
+} from './mcp/browser/index.js';
 import type { AgentCommand, AgentEvent } from '../../src/lib/socket/types.js';
 
 // Bumped on every code change that touches the agent ↔ dashboard contract,
@@ -54,7 +58,7 @@ import type { AgentCommand, AgentEvent } from '../../src/lib/socket/types.js';
 // confirm the device is running the build that includes a given fix
 // (e.g. v0.2.0 = chat attachments are downloaded over HTTP instead of
 // surviving as `__ATTACHMENT_<index>__` placeholders).
-console.log('🔧 Dev Dashboard Agent v0.4.0 (pm2-mcp + browser-mcp)');
+console.log('🔧 Dev Dashboard Agent v0.5.0 (browser snapshot-on-demand)');
 console.log('─'.repeat(40));
 
 const config = loadConfig();
@@ -336,6 +340,30 @@ const { socket } = createConnection(config, {
           command.decision,
         );
         return;
+
+      case 'BROWSER_SNAPSHOT_REQUEST': {
+        // One-shot screenshot of an EXISTING context. Never creates a
+        // context (see captureSnapshot's docstring) — `frame: undefined`
+        // is the dashboard's signal that the user reloaded a page that
+        // had no live browser to begin with.
+        try {
+          const frame = await captureBrowserSnapshot(command.chatId);
+          response = {
+            type: 'BROWSER_SNAPSHOT_RESULT',
+            requestId: command.id,
+            ...(frame
+              ? { frame }
+              : { error: `no browser context for chat ${command.chatId}` }),
+          };
+        } catch (err) {
+          response = {
+            type: 'BROWSER_SNAPSHOT_RESULT',
+            requestId: command.id,
+            error: err instanceof Error ? err.message : String(err),
+          };
+        }
+        break;
+      }
 
       default:
         response = {

@@ -30,6 +30,8 @@ import { BrowserPreview } from './BrowserPreview';
 interface BrowserFullscreenModalProps {
   opened: boolean;
   chatId: string;
+  /** Forwarded to <BrowserPreview> for one-shot snapshot fetches. */
+  projectId?: string;
   /** Header label. Typically the chat title; falls back to "Browser preview". */
   title?: string;
   inputDisabled?: boolean;
@@ -40,6 +42,7 @@ interface BrowserFullscreenModalProps {
 export function BrowserFullscreenModal({
   opened,
   chatId,
+  projectId,
   title,
   inputDisabled,
   onSend,
@@ -85,7 +88,7 @@ export function BrowserFullscreenModal({
       }}
     >
       <Box style={{ position: 'relative', height: '100%', minHeight: 0 }}>
-        <BrowserPreview chatId={chatId} />
+        <BrowserPreview chatId={chatId} projectId={projectId} />
 
         {/* Floating composer — bottom-right so it doesn't cover the URL bar. */}
         <Paper
