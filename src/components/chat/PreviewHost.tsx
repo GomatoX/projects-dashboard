@@ -33,8 +33,7 @@ export function PreviewHost({
   onToggleExpand,
 }: PreviewHostProps) {
   const previewState = usePreviewSlice(chatId);
-  const activeItem =
-    previewState.items.find((i) => i.id === previewState.activeId) ?? null;
+  const activeItem = previewState.items.find((i) => i.id === previewState.activeId) ?? null;
 
   const [splitPercentRaw, setSplitPercentRaw] = useLocalStorage<number>({
     key: 'chat:previewSplitPercent',
@@ -79,9 +78,7 @@ export function PreviewHost({
           minHeight: 0,
           borderLeft: '1px solid var(--mantine-color-dark-6)',
           background: 'var(--mantine-color-dark-7)',
-          transition: isResizing
-            ? 'none'
-            : 'flex-basis 200ms cubic-bezier(0.4, 0, 0.2, 1)',
+          transition: isResizing ? 'none' : 'flex-basis 200ms cubic-bezier(0.4, 0, 0.2, 1)',
           overflow: 'hidden',
         }}
       >

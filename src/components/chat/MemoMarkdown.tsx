@@ -124,9 +124,7 @@ const COMPONENTS: Components = {
         borderRadius: 'var(--mantine-radius-xs)',
       }}
     >
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-        {children}
-      </table>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>{children}</table>
     </Box>
   ),
   th: ({ children }) => (

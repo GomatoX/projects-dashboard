@@ -20,10 +20,7 @@
 'use client';
 
 import { useSyncExternalStore } from 'react';
-import type {
-  PermissionRequest,
-  ToolActivity,
-} from './ToolApprovalCard';
+import type { PermissionRequest, ToolActivity } from './ToolApprovalCard';
 
 export interface ChatStreamState {
   content: string;
@@ -75,10 +72,7 @@ function getSlice(chatId: string): ChatStreamState {
   return slices.get(chatId) ?? EMPTY_STATE;
 }
 
-function update(
-  chatId: string,
-  mut: (prev: ChatStreamState) => ChatStreamState,
-): void {
+function update(chatId: string, mut: (prev: ChatStreamState) => ChatStreamState): void {
   const prev = slices.get(chatId) ?? EMPTY_STATE;
   const next = mut(prev);
   if (next === prev) return;
@@ -134,9 +128,7 @@ export function updatePermission(
 ): void {
   update(chatId, (s) => ({
     ...s,
-    permissions: s.permissions.map((p) =>
-      p.toolUseId === toolUseId ? { ...p, status } : p,
-    ),
+    permissions: s.permissions.map((p) => (p.toolUseId === toolUseId ? { ...p, status } : p)),
   }));
 }
 
@@ -193,16 +185,20 @@ export function useActiveStreamingChats(): ReadonlySet<string> {
   };
   // useSyncExternalStore needs a stable snapshot for unchanged calls; cache
   // by membership signature.
-  return useSyncExternalStore(subscribe, () => {
-    const sig: string[] = [];
-    for (const [id, s] of slices) if (s.active) sig.push(id);
-    sig.sort();
-    const key = sig.join(',');
-    if (key === lastActiveKey) return lastActiveSet;
-    lastActiveKey = key;
-    lastActiveSet = new Set(sig);
-    return lastActiveSet;
-  }, () => EMPTY_ACTIVE_SET);
+  return useSyncExternalStore(
+    subscribe,
+    () => {
+      const sig: string[] = [];
+      for (const [id, s] of slices) if (s.active) sig.push(id);
+      sig.sort();
+      const key = sig.join(',');
+      if (key === lastActiveKey) return lastActiveSet;
+      lastActiveKey = key;
+      lastActiveSet = new Set(sig);
+      return lastActiveSet;
+    },
+    () => EMPTY_ACTIVE_SET,
+  );
 }
 
 let lastActiveKey = '';

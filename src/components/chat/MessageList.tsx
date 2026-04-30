@@ -39,10 +39,7 @@ export function MessageList({
   const scrollerRef = useRef<HTMLElement | null>(null);
   const [atBottom, setAtBottom] = useState(true);
 
-  const Footer = useCallback(
-    () => <Box>{renderStreamingBubble()}</Box>,
-    [renderStreamingBubble],
-  );
+  const Footer = useCallback(() => <Box>{renderStreamingBubble()}</Box>, [renderStreamingBubble]);
 
   const jumpToBottom = () => {
     const el = scrollerRef.current;

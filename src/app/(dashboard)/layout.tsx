@@ -44,20 +44,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         padding="lg"
         styles={{
           main: {
-            backgroundColor:
-              'light-dark(#f6f8fa, var(--mantine-color-dark-9))',
+            backgroundColor: 'light-dark(#f6f8fa, var(--mantine-color-dark-9))',
             minHeight: '100vh',
           },
           header: {
-            backgroundColor:
-              'light-dark(var(--mantine-color-white), var(--mantine-color-dark-8))',
+            backgroundColor: 'light-dark(var(--mantine-color-white), var(--mantine-color-dark-8))',
             borderBottom:
               '1px solid light-dark(var(--mantine-color-gray-3), var(--mantine-color-dark-5))',
             backdropFilter: 'blur(16px)',
           },
           navbar: {
-            backgroundColor:
-              'light-dark(var(--mantine-color-white), var(--mantine-color-dark-8))',
+            backgroundColor: 'light-dark(var(--mantine-color-white), var(--mantine-color-dark-8))',
             borderRight:
               '1px solid light-dark(var(--mantine-color-gray-3), var(--mantine-color-dark-5))',
           },
@@ -73,9 +70,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
         <AppShell.Main>
           <div className="animated-grid-bg" />
-          <div className="animate-fade-in">
-            {children}
-          </div>
+          <div className="animate-fade-in">{children}</div>
         </AppShell.Main>
       </AppShell>
     </SpotlightProvider>

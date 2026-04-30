@@ -40,10 +40,7 @@ export function readPreview(chatId: string): PreviewState {
   return slices.get(chatId) ?? EMPTY_PREVIEW_STATE;
 }
 
-export function writePreview(
-  chatId: string,
-  mut: (prev: PreviewState) => PreviewState,
-): void {
+export function writePreview(chatId: string, mut: (prev: PreviewState) => PreviewState): void {
   const prev = slices.get(chatId) ?? EMPTY_PREVIEW_STATE;
   const next = mut(prev);
   if (next === prev) return;

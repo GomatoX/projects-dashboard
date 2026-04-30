@@ -5,9 +5,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 // `streaming.appendText`, …) working unchanged. The only API name that
 // differs from the deleted shim is `.get` → `.readSlice`, fixed below.
 import * as streaming from './streaming-store';
-import {
-  writePreview as writePreviewToStore,
-} from './preview-store';
+import { writePreview as writePreviewToStore } from './preview-store';
 import { mergePreviewItem } from '@/lib/ai/preview-merge';
 import { pushFrame, clearChat as clearBrowserFrames } from '@/lib/ai/browser-frame-store';
 import { type ChatMsg } from './ChatMessage';
@@ -362,10 +360,7 @@ export function useChatStream(args: UseChatStreamArgs) {
   // history. The raw `File` objects never reach the stream route — by the
   // time we hit /stream, the bytes already live on disk and we just pass
   // along URLs the agent (and the UI) can read back.
-  const sendMessage = async (
-    content: string,
-    pending: PendingAttachment[] = [],
-  ) => {
+  const sendMessage = async (content: string, pending: PendingAttachment[] = []) => {
     if (!activeChat) return;
     // Per-chat guard: a chat that is already streaming (locally or on the
     // server) cannot accept another turn until it finishes. Other chats are

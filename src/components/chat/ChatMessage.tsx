@@ -3,12 +3,7 @@
 import { memo } from 'react';
 import { Box, Group, Text, Badge, ThemeIcon, Anchor, Modal, UnstyledButton } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
-import {
-  IconUser,
-  IconSparkles,
-  IconFile,
-  IconFileTypePdf,
-} from '@tabler/icons-react';
+import { IconUser, IconSparkles, IconFile, IconFileTypePdf } from '@tabler/icons-react';
 import { MemoMarkdown } from './MemoMarkdown';
 
 export interface ChatMsg {
@@ -105,10 +100,7 @@ export const ChatMessage = memo(
               </Group>
             )}
 
-            <Box
-              className="chat-markdown"
-              style={{ fontSize: 13.5, lineHeight: 1.7 }}
-            >
+            <Box className="chat-markdown" style={{ fontSize: 13.5, lineHeight: 1.7 }}>
               <MemoMarkdown content={message.content} />
             </Box>
           </Box>

@@ -1,11 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import {
-  Box,
-  Center,
-  Loader,
-} from '@mantine/core';
+import { Box, Center, Loader } from '@mantine/core';
 import { ChatList } from './ChatList';
 import { ChatInput } from './ChatInput';
 import { ChatHeader } from './ChatHeader';
@@ -64,8 +60,12 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
 
   const activeChatData = list.chatList.find((c) => c.id === list.activeChat);
   // Active-chat-scoped views — derived once so the JSX stays readable.
-  const activeIsLocallyStreaming = list.activeChat ? stream.streamingChats.has(list.activeChat) : false;
-  const activeIsServerStreaming = list.activeChat ? list.serverStreamingChats.has(list.activeChat) : false;
+  const activeIsLocallyStreaming = list.activeChat
+    ? stream.streamingChats.has(list.activeChat)
+    : false;
+  const activeIsServerStreaming = list.activeChat
+    ? list.serverStreamingChats.has(list.activeChat)
+    : false;
   const activeShowsLiveTurn = activeIsLocallyStreaming || activeIsServerStreaming;
   // Disable input only on the chat that is busy; siblings stay usable.
   const inputDisabled = activeShowsLiveTurn;
@@ -105,118 +105,116 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
           overflow: 'hidden',
         }}
       >
-      <Box
-        ref={containerRef}
-        style={{
-          flex: 1,
-          minWidth: 0,
-          display: 'flex',
-          height: '100%',
-          minHeight: 0,
-          overflow: 'hidden',
-        }}
-      >
-      {/* Chat Area */}
-      <Box
-        style={{
-          flex: 1,
-          minWidth: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
-        }}
-      >
-        {/* Header */}
-        {activeChatData && (
-          <ChatHeader
-            title={activeChatData.title}
-            estimatedCost={activeChatData.estimatedCost}
-            executionMode={activeChatData.executionMode ?? 'local'}
-            selectedModel={list.selectedModel}
-            isStreaming={activeShowsLiveTurn}
-            isCancelling={!!list.activeChat && stream.cancellingChats.has(list.activeChat)}
-            deviceId={deviceId}
-            deviceConnected={deviceConnected}
-            onStop={() => list.activeChat && stream.stopChat(list.activeChat)}
-            onModelChange={(val) => {
-              list.setSelectedModel(val);
-              if (typeof window !== 'undefined') {
-                window.localStorage.setItem(LAST_MODEL_STORAGE_KEY, val);
-              }
-              if (list.activeChat) {
-                fetch(`/api/projects/${projectId}/chat/${list.activeChat}`, {
-                  method: 'PATCH',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ model: val }),
-                });
-                list.setChatList((prev) =>
-                  prev.map((c) => (c.id === list.activeChat ? { ...c, model: val } : c)),
-                );
-              }
+        <Box
+          ref={containerRef}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            display: 'flex',
+            height: '100%',
+            minHeight: 0,
+            overflow: 'hidden',
+          }}
+        >
+          {/* Chat Area */}
+          <Box
+            style={{
+              flex: 1,
+              minWidth: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
             }}
-            onModeChange={(mode) => {
-              if (typeof window !== 'undefined') {
-                window.localStorage.setItem(LAST_MODE_STORAGE_KEY, mode);
-              }
-              if (list.activeChat) {
-                fetch(`/api/projects/${projectId}/chat/${list.activeChat}`, {
-                  method: 'PATCH',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ executionMode: mode }),
-                });
-                list.setChatList((prev) =>
-                  prev.map((c) =>
-                    c.id === list.activeChat ? { ...c, executionMode: mode } : c,
-                  ),
-                );
-              }
-            }}
-          />
-        )}
-
-        <MessageList
-          activeChat={list.activeChat}
-          messages={list.messages}
-          showsLiveTurn={activeShowsLiveTurn}
-          onCreate={list.createChat}
-          renderStreamingBubble={() =>
-            list.activeChat ? (
-              <StreamingBubble
-                chatId={list.activeChat}
-                serverStreaming={activeIsServerStreaming}
-                respondingToToolUseId={stream.respondingTo}
-                onApprove={stream.approvePermission}
-                onDeny={stream.denyPermission}
+          >
+            {/* Header */}
+            {activeChatData && (
+              <ChatHeader
+                title={activeChatData.title}
+                estimatedCost={activeChatData.estimatedCost}
+                executionMode={activeChatData.executionMode ?? 'local'}
+                selectedModel={list.selectedModel}
+                isStreaming={activeShowsLiveTurn}
+                isCancelling={!!list.activeChat && stream.cancellingChats.has(list.activeChat)}
+                deviceId={deviceId}
+                deviceConnected={deviceConnected}
+                onStop={() => list.activeChat && stream.stopChat(list.activeChat)}
+                onModelChange={(val) => {
+                  list.setSelectedModel(val);
+                  if (typeof window !== 'undefined') {
+                    window.localStorage.setItem(LAST_MODEL_STORAGE_KEY, val);
+                  }
+                  if (list.activeChat) {
+                    fetch(`/api/projects/${projectId}/chat/${list.activeChat}`, {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ model: val }),
+                    });
+                    list.setChatList((prev) =>
+                      prev.map((c) => (c.id === list.activeChat ? { ...c, model: val } : c)),
+                    );
+                  }
+                }}
+                onModeChange={(mode) => {
+                  if (typeof window !== 'undefined') {
+                    window.localStorage.setItem(LAST_MODE_STORAGE_KEY, mode);
+                  }
+                  if (list.activeChat) {
+                    fetch(`/api/projects/${projectId}/chat/${list.activeChat}`, {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ executionMode: mode }),
+                    });
+                    list.setChatList((prev) =>
+                      prev.map((c) =>
+                        c.id === list.activeChat ? { ...c, executionMode: mode } : c,
+                      ),
+                    );
+                  }
+                }}
               />
-            ) : null
-          }
-        />
+            )}
 
-        {/* Input */}
-        {list.activeChat && (
-          <ChatInput onSend={stream.sendMessage} disabled={inputDisabled} />
-        )}
-      </Box>
+            <MessageList
+              activeChat={list.activeChat}
+              messages={list.messages}
+              showsLiveTurn={activeShowsLiveTurn}
+              onCreate={list.createChat}
+              renderStreamingBubble={() =>
+                list.activeChat ? (
+                  <StreamingBubble
+                    chatId={list.activeChat}
+                    serverStreaming={activeIsServerStreaming}
+                    respondingToToolUseId={stream.respondingTo}
+                    onApprove={stream.approvePermission}
+                    onDeny={stream.denyPermission}
+                  />
+                ) : null
+              }
+            />
 
+            {/* Input */}
+            {list.activeChat && <ChatInput onSend={stream.sendMessage} disabled={inputDisabled} />}
+          </Box>
+
+          {list.activeChat && (
+            <PreviewHost
+              chatId={list.activeChat}
+              containerRef={containerRef}
+              open={previewOpen}
+              expanded={previewExpanded}
+              onClose={() => setPreviewOpen(false)}
+              onToggleExpand={() => setPreviewExpanded((e) => !e)}
+            />
+          )}
+        </Box>
         {list.activeChat && (
-          <PreviewHost
+          <PreviewRailHost
             chatId={list.activeChat}
-            containerRef={containerRef}
-            open={previewOpen}
-            expanded={previewExpanded}
-            onClose={() => setPreviewOpen(false)}
-            onToggleExpand={() => setPreviewExpanded((e) => !e)}
+            panelOpen={previewOpen}
+            onSelect={() => setPreviewOpen(true)}
+            onTogglePanel={() => setPreviewOpen((o) => !o)}
           />
         )}
-      </Box>
-      {list.activeChat && (
-        <PreviewRailHost
-          chatId={list.activeChat}
-          panelOpen={previewOpen}
-          onSelect={() => setPreviewOpen(true)}
-          onTogglePanel={() => setPreviewOpen((o) => !o)}
-        />
-      )}
       </Box>
     </Box>
   );
