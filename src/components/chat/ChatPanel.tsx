@@ -10,6 +10,7 @@ import { useChatsList } from './use-chats-list';
 import { useChatStream } from './use-chat-stream';
 import { MessageList } from './MessageList';
 import { BrowserFullscreenModal } from './preview/BrowserFullscreenModal';
+import { useBrowserPopout } from './preview/use-browser-popout';
 
 const LAST_MODEL_STORAGE_KEY = 'chat:lastSelectedModel';
 const LAST_MODE_STORAGE_KEY = 'chat:lastExecutionMode';
@@ -40,6 +41,8 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
     setPreviewExpanded(false);
     setBrowserFullscreenOpen(false);
   }, [list.activeChat]);
+
+  const browserPopout = useBrowserPopout(list.activeChat);
 
   const stream = useChatStream({
     projectId,
@@ -200,6 +203,8 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
               onClose={() => setPreviewOpen(false)}
               onToggleExpand={() => setPreviewExpanded((e) => !e)}
               onOpenBrowserFullscreen={() => setBrowserFullscreenOpen(true)}
+              onOpenBrowserPopout={browserPopout.openPopout}
+              browserPoppedOut={browserPopout.isPoppedOut}
             />
           )}
         </Box>
