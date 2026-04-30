@@ -4,6 +4,11 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { useStreamingState } from './streaming-state';
 import { useChatStreamSlice } from './streaming-store';
 import {
+  hasPreview as hasPreviewInStore,
+  usePreviewSlice,
+  writePreview as writePreviewToStore,
+} from './preview-store';
+import {
   Box,
   Group,
   Stack,
@@ -149,8 +154,6 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
 
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewExpanded, setPreviewExpanded] = useState(false);
-  const [previewRevision, setPreviewRevision] = useState(0);
-  const lastPreviewsRef = useRef<Map<string, PreviewState>>(new Map());
 
   // Persisted chat/preview split — value is the panel-area percentage of the
   // outer flex row (i.e. chat column gets 100 - split%). Clamped on read so a
@@ -174,22 +177,9 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
     [setSplitPercentRaw],
   );
 
-  const previewState: PreviewState = activeChat
-    ? (lastPreviewsRef.current.get(activeChat) ?? EMPTY_PREVIEW_STATE)
-    : EMPTY_PREVIEW_STATE;
+  const previewState = usePreviewSlice(activeChat);
   const activeItem = previewState.items.find((i) => i.id === previewState.activeId) ?? null;
   const hasItems = previewState.items.length > 0;
-
-  const writePreview = useCallback(
-    (chatId: string, mut: (prev: PreviewState) => PreviewState) => {
-      const prev = lastPreviewsRef.current.get(chatId) ?? EMPTY_PREVIEW_STATE;
-      const next = mut(prev);
-      if (next === prev) return;
-      lastPreviewsRef.current.set(chatId, next);
-      setPreviewRevision((r) => r + 1);
-    },
-    [],
-  );
 
   // Shared dispatcher for the three BROWSER_* events emitted by the agent's
   // browser MCP. Returns true when the event was handled (so the caller can
@@ -201,7 +191,7 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
       if (event.type === 'BROWSER_CONTEXT_OPENED') {
         // Insert a synthetic 'browser' PreviewItem so the rail shows it.
         // Content is empty — the live store carries the frames.
-        writePreview(chatId, (prev) =>
+        writePreviewToStore(chatId, (prev) =>
           mergePreviewItem(
             prev,
             {
@@ -220,7 +210,7 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
       }
       if (event.type === 'BROWSER_CONTEXT_CLOSED') {
         // Remove the browser item from the rail. Other previews stay.
-        writePreview(chatId, (prev) => ({
+        writePreviewToStore(chatId, (prev) => ({
           ...prev,
           items: prev.items.filter((i) => i.id !== `browser:${chatId}`),
           activeId: prev.activeId === `browser:${chatId}` ? null : prev.activeId,
@@ -240,7 +230,7 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
       }
       return false;
     },
-    [writePreview],
+    [],
   );
 
   // When switching chats, leave the panel closed by default — the rail still
@@ -319,12 +309,9 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
           isStreaming ? withAdded(prev, chatId) : withRemoved(prev, chatId),
         );
 
-        // Restore the side previews from ALL assistant messages with preview
-        // fences (oldest → newest), replayed through the merge logic so the
-        // final state matches what the live stream would have produced. Only
-        // run this when we don't already have state for this chat (a live
-        // stream would have populated it already).
-        if (!lastPreviewsRef.current.has(chatId)) {
+        // Restore history previews only when no live state exists yet —
+        // a live stream populates the store and overrides this path.
+        if (!hasPreviewInStore(chatId)) {
           let restored: PreviewState = EMPTY_PREVIEW_STATE;
           for (const m of msgs) {
             if (m.role !== 'assistant' || !m.content) continue;
@@ -334,11 +321,7 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
             }
           }
           if (restored.items.length > 0) {
-            lastPreviewsRef.current.set(chatId, restored);
-            setPreviewRevision((r) => r + 1);
-            // Don't auto-open on history restore — the rail icons make the
-            // previews discoverable, and forcing the panel open after every
-            // reload is intrusive when the user just wants to read the chat.
+            writePreviewToStore(chatId, () => restored);
           }
         }
       } catch {
@@ -421,7 +404,7 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
         return;
       }
       if (event.type === 'preview') {
-        writePreview(chatId, (prev) =>
+        writePreviewToStore(chatId, (prev) =>
           mergePreviewItem(
             prev,
             {
@@ -465,7 +448,7 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
         streaming.end(chatId);
       }
     },
-    [streaming, fetchMessages, fetchChats, writePreview, handleBrowserEvent],
+    [streaming, fetchMessages, fetchChats, handleBrowserEvent],
   );
 
   // ─── Reattach to a server-side live stream ──────────────────────────────
@@ -729,7 +712,7 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
         // the same separation as the persisted row will after refetch.
         streaming.appendTurnBreak(chatId);
       } else if (event.type === 'preview') {
-        writePreview(chatId, (prev) =>
+        writePreviewToStore(chatId, (prev) =>
           mergePreviewItem(
             prev,
             {
@@ -1611,7 +1594,7 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
             }}
           >
             <PreviewPanel
-              key={`${activeItem.id}:${previewRevision}`}
+              key={activeItem.id}
               item={activeItem}
               chatId={activeChat!}
               isExpanded={previewExpanded}
@@ -1628,7 +1611,7 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
           activeId={previewState.activeId}
           panelOpen={previewOpen}
           onSelect={(id) => {
-            writePreview(activeChat, (prev) => ({ ...prev, activeId: id }));
+            writePreviewToStore(activeChat, (prev) => ({ ...prev, activeId: id }));
             setPreviewOpen(true);
           }}
           onTogglePanel={() => setPreviewOpen((o) => !o)}
