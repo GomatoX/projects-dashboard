@@ -111,6 +111,7 @@ export const ChatMessage = memo(
   (prev, next) =>
     prev.isStreaming === next.isStreaming &&
     prev.message.id === next.message.id &&
+    prev.message.role === next.message.role &&
     prev.message.content === next.message.content &&
     prev.message.attachments === next.message.attachments &&
     prev.message.tokensIn === next.message.tokensIn &&

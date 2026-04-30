@@ -10,17 +10,22 @@
 
 'use client';
 
-import { useCallback, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import { Box, Button, ActionIcon, Center, Stack, Text } from '@mantine/core';
 import { IconSparkles, IconArrowDown, IconPlus } from '@tabler/icons-react';
 import { ChatMessage, type ChatMsg } from './ChatMessage';
+import { StreamingBubble } from './StreamingBubble';
 
 interface MessageListProps {
   activeChat: string | null;
   messages: ChatMsg[];
   showsLiveTurn: boolean;
-  renderStreamingBubble: () => ReactNode;
+  /** True when the SERVER reports the active chat's turn is in flight but this tab isn't driving. */
+  serverStreaming: boolean;
+  respondingToToolUseId: string | null;
+  onApprovePermission: (toolUseId: string) => void;
+  onDenyPermission: (toolUseId: string) => void;
   onCreate: () => void;
 }
 
@@ -28,7 +33,10 @@ export function MessageList({
   activeChat,
   messages,
   showsLiveTurn,
-  renderStreamingBubble,
+  serverStreaming,
+  respondingToToolUseId,
+  onApprovePermission,
+  onDenyPermission,
   onCreate,
 }: MessageListProps) {
   // Capture the underlying scroller element so the jump-pill can scroll past
@@ -39,7 +47,30 @@ export function MessageList({
   const scrollerRef = useRef<HTMLElement | null>(null);
   const [atBottom, setAtBottom] = useState(true);
 
-  const Footer = useCallback(() => <Box>{renderStreamingBubble()}</Box>, [renderStreamingBubble]);
+  // Owning the streaming bubble (rather than receiving it through a render-prop)
+  // keeps the Footer's identity stable when ChatPanel re-renders for unrelated
+  // reasons (chat-list poll, stream start/end). An unstable Footer in
+  // virtuoso's `components` map causes the Footer subtree to remount, which
+  // would tear down and recreate `<StreamingBubble>`'s slice subscription —
+  // exactly the cascade Phase 4 was meant to eliminate.
+  const Footer = useCallback(
+    () =>
+      activeChat ? (
+        <Box>
+          <StreamingBubble
+            chatId={activeChat}
+            serverStreaming={serverStreaming}
+            respondingToToolUseId={respondingToToolUseId}
+            onApprove={onApprovePermission}
+            onDeny={onDenyPermission}
+          />
+        </Box>
+      ) : null,
+    [activeChat, serverStreaming, respondingToToolUseId, onApprovePermission, onDenyPermission],
+  );
+  // Defensive: keep the `components` object identity stable when its members
+  // don't change, so virtuoso doesn't churn its component machinery.
+  const components = useMemo(() => ({ Footer }), [Footer]);
 
   const jumpToBottom = () => {
     const el = scrollerRef.current;
@@ -96,7 +127,7 @@ export function MessageList({
         data={messages}
         computeItemKey={(_, msg) => msg.id}
         itemContent={(_, msg) => <ChatMessage message={msg} />}
-        components={{ Footer }}
+        components={components}
         // Stick-to-bottom while at end. `followOutput` triggers on data-length
         // change; mid-stream Footer growth is handled by virtuoso's internal
         // SIZE_INCREASED auto-scroll (kicks in when the user is glued to

@@ -232,6 +232,5 @@ export function useChatsList(projectId: string, defaultModel: string) {
     deleteChat,
     fetchMessages, // exposed because the SSE reader needs it on `done`
     fetchChats, // same
-    setServerStreamingChats, // for the reattach effect to clear after done
   };
 }

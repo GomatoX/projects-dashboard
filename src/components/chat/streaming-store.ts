@@ -43,8 +43,9 @@ export const EMPTY_STATE: ChatStreamState = Object.freeze({
 type Listener = () => void;
 
 // One Set of listeners per chatId — a token delta on chat A only wakes
-// subscribers of chat A. The store-wide listener Set ('*') exists so the
-// chat list can re-render when *any* chat flips active/inactive.
+// subscribers of chat A. `globalListeners` is a separate set that fires on
+// every emit, so consumers like `useActiveStreamingChats` can react to any
+// chat flipping active/inactive.
 const slices = new Map<string, ChatStreamState>();
 const listeners = new Map<string, Set<Listener>>();
 const globalListeners = new Set<Listener>();
@@ -176,15 +177,8 @@ export function useActiveStreamingChats(): ReadonlySet<string> {
     globalListeners.add(fn);
     return () => globalListeners.delete(fn);
   };
-  const getSnapshot = (): ReadonlySet<string> => {
-    // Return a new Set on demand; the consumer should only re-render if
-    // membership actually changed, which it does via the listener fire.
-    const out = new Set<string>();
-    for (const [id, s] of slices) if (s.active) out.add(id);
-    return out;
-  };
   // useSyncExternalStore needs a stable snapshot for unchanged calls; cache
-  // by membership signature.
+  // by membership signature so identical sets return the same reference.
   return useSyncExternalStore(
     subscribe,
     () => {

@@ -5,7 +5,6 @@ import { Box, Center, Loader } from '@mantine/core';
 import { ChatList } from './ChatList';
 import { ChatInput } from './ChatInput';
 import { ChatHeader } from './ChatHeader';
-import { StreamingBubble } from './StreamingBubble';
 import { PreviewHost, PreviewRailHost } from './PreviewHost';
 import { useChatsList } from './use-chats-list';
 import { useChatStream } from './use-chat-stream';
@@ -178,18 +177,11 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
               activeChat={list.activeChat}
               messages={list.messages}
               showsLiveTurn={activeShowsLiveTurn}
+              serverStreaming={activeIsServerStreaming}
+              respondingToToolUseId={stream.respondingTo}
+              onApprovePermission={stream.approvePermission}
+              onDenyPermission={stream.denyPermission}
               onCreate={list.createChat}
-              renderStreamingBubble={() =>
-                list.activeChat ? (
-                  <StreamingBubble
-                    chatId={list.activeChat}
-                    serverStreaming={activeIsServerStreaming}
-                    respondingToToolUseId={stream.respondingTo}
-                    onApprove={stream.approvePermission}
-                    onDeny={stream.denyPermission}
-                  />
-                ) : null
-              }
             />
 
             {/* Input */}
