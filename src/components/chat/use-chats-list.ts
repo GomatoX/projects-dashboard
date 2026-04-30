@@ -9,6 +9,7 @@ import {
   clearPreview,
 } from './preview-store';
 import { clear as clearStreamingState } from './streaming-store';
+import { setPoppedOut } from './preview/popout-state-store';
 import { clearChat as clearBrowserFrames } from '@/lib/ai/browser-frame-store';
 import { EMPTY_PREVIEW_STATE, type PreviewState } from '@/lib/ai/preview-types';
 import { extractAllPreviews } from '@/lib/ai/preview-detector';
@@ -201,6 +202,7 @@ export function useChatsList(projectId: string, defaultModel: string) {
       clearBrowserFrames(chatId);
       clearStreamingState(chatId);
       clearPreview(chatId);
+      setPoppedOut(chatId, false);
       const updated = chatList.filter((c) => c.id !== chatId);
       setChatList(updated);
       if (activeChat === chatId) {
