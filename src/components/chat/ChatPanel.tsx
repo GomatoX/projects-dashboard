@@ -1,31 +1,19 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { useChatStreamSlice } from './streaming-store';
 import {
   Box,
-  Stack,
-  Text,
-  Button,
-  ActionIcon,
-  ScrollArea,
   Center,
   Loader,
 } from '@mantine/core';
-import {
-  IconPlus,
-  IconSparkles,
-  IconArrowDown,
-} from '@tabler/icons-react';
 import { ChatList } from './ChatList';
-import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
 import { ChatHeader } from './ChatHeader';
 import { StreamingBubble } from './StreamingBubble';
 import { PreviewHost, PreviewRailHost } from './PreviewHost';
-import { useStickToBottom } from './useStickToBottom';
 import { useChatsList } from './use-chats-list';
 import { useChatStream } from './use-chat-stream';
+import { MessageList } from './MessageList';
 
 const LAST_MODEL_STORAGE_KEY = 'chat:lastSelectedModel';
 const LAST_MODE_STORAGE_KEY = 'chat:lastExecutionMode';
@@ -39,7 +27,6 @@ interface ChatPanelProps {
 
 export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
 
   const list = useChatsList(projectId, DEFAULT_MODEL);
 
@@ -66,25 +53,6 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
     appendOptimisticUserMessage: (m) => list.setMessages((prev) => [...prev, m]),
     chatList: list.chatList,
   });
-
-  // Subscribed read of the active chat's slice. Re-renders the panel ONLY
-  // when this chat's streaming state actually changes — token deltas on a
-  // background chat do not wake this component.
-  const activeStreamState = useChatStreamSlice(list.activeChat);
-
-  // Auto-scroll on new content — only when the user is already at the
-  // bottom. When they're scrolled up, surface a "↓" pill instead of
-  // yanking them back. See useStickToBottom for the full state machine.
-  const { isAtBottom, jumpToBottom } = useStickToBottom(
-    scrollRef,
-    [
-      list.messages,
-      activeStreamState?.content,
-      activeStreamState?.permissions.length ?? 0,
-      activeStreamState?.toolActivities.length ?? 0,
-    ],
-    list.activeChat,
-  );
 
   if (list.loading) {
     return (
@@ -206,116 +174,23 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
           />
         )}
 
-        {/* Messages — wrapped in a position:relative box so the
-            jump-to-latest pill can anchor to the scroll area. */}
-        <Box
-          style={{
-            flex: 1,
-            minHeight: 0,
-            position: 'relative',
-            display: 'flex',
-            flexDirection: 'column',
-          }}
-        >
-        <ScrollArea
-          style={{ flex: 1 }}
-          type="auto"
-          viewportRef={scrollRef}
-        >
-          <Stack gap={0} px="md" py="sm">
-            {!list.activeChat ? (
-              <Center h={300}>
-                <Stack align="center" gap="sm">
-                  <IconSparkles size={48} style={{ opacity: 0.15 }} />
-                  <Text size="sm" c="dimmed">
-                    Create a new chat to get started
-                  </Text>
-                  <Button
-                    size="sm"
-                    variant="light"
-                    color="brand"
-                    leftSection={<IconPlus size={14} />}
-                    onClick={list.createChat}
-                  >
-                    New Chat
-                  </Button>
-                </Stack>
-              </Center>
-            ) : list.messages.length === 0 && !activeShowsLiveTurn ? (
-              <Center h={300}>
-                <Stack align="center" gap="sm">
-                  <IconSparkles size={48} style={{ opacity: 0.15 }} />
-                  <Text size="sm" c="dimmed">
-                    Send a message to start chatting
-                  </Text>
-                </Stack>
-              </Center>
-            ) : (
-              <>
-                {list.messages.map((msg) => (
-                  <ChatMessage key={msg.id} message={msg} />
-                ))}
-
-                {list.activeChat && (
-                  <StreamingBubble
-                    chatId={list.activeChat}
-                    serverStreaming={activeIsServerStreaming}
-                    respondingToToolUseId={stream.respondingTo}
-                    onApprove={stream.approvePermission}
-                    onDeny={stream.denyPermission}
-                  />
-                )}
-              </>
-            )}
-          </Stack>
-        </ScrollArea>
-
-          {/* Jump-to-latest pill. Hidden when already at bottom. While
-              the assistant is streaming, expands to a labeled "Writing"
-              pill so the user knows new content is being produced below
-              their current scroll position. */}
-          {!isAtBottom &&
-            (activeShowsLiveTurn ? (
-              <Button
-                onClick={() => jumpToBottom('smooth')}
-                size="compact-xs"
-                radius="xl"
-                variant="filled"
-                color="blue"
-                rightSection={<IconArrowDown size={12} />}
-                aria-label="Jump to latest (assistant is writing)"
-                style={{
-                  position: 'absolute',
-                  bottom: 10,
-                  left: '50%',
-                  transform: 'translateX(-50%)',
-                  zIndex: 5,
-                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.35)',
-                }}
-              >
-                Writing
-              </Button>
-            ) : (
-              <ActionIcon
-                onClick={() => jumpToBottom('smooth')}
-                radius="xl"
-                size="sm"
-                variant="filled"
-                color="gray"
-                aria-label="Jump to latest"
-                style={{
-                  position: 'absolute',
-                  bottom: 10,
-                  left: '50%',
-                  transform: 'translateX(-50%)',
-                  zIndex: 5,
-                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.35)',
-                }}
-              >
-                <IconArrowDown size={12} />
-              </ActionIcon>
-            ))}
-        </Box>
+        <MessageList
+          activeChat={list.activeChat}
+          messages={list.messages}
+          showsLiveTurn={activeShowsLiveTurn}
+          onCreate={list.createChat}
+          renderStreamingBubble={() =>
+            list.activeChat ? (
+              <StreamingBubble
+                chatId={list.activeChat}
+                serverStreaming={activeIsServerStreaming}
+                respondingToToolUseId={stream.respondingTo}
+                onApprove={stream.approvePermission}
+                onDeny={stream.denyPermission}
+              />
+            ) : null
+          }
+        />
 
         {/* Input */}
         {list.activeChat && (
