@@ -9,6 +9,7 @@ import { PreviewHost, PreviewRailHost } from './PreviewHost';
 import { useChatsList } from './use-chats-list';
 import { useChatStream } from './use-chat-stream';
 import { MessageList } from './MessageList';
+import { BrowserFullscreenModal } from './preview/BrowserFullscreenModal';
 
 const LAST_MODEL_STORAGE_KEY = 'chat:lastSelectedModel';
 const LAST_MODE_STORAGE_KEY = 'chat:lastExecutionMode';
@@ -27,6 +28,7 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
 
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewExpanded, setPreviewExpanded] = useState(false);
+  const [browserFullscreenOpen, setBrowserFullscreenOpen] = useState(false);
 
   // When switching chats, leave the panel closed by default — the rail still
   // shows the available previews so the user can click in if they want. Live
@@ -36,6 +38,7 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
     if (!list.activeChat) return;
     setPreviewOpen(false);
     setPreviewExpanded(false);
+    setBrowserFullscreenOpen(false);
   }, [list.activeChat]);
 
   const stream = useChatStream({
@@ -196,6 +199,7 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
               expanded={previewExpanded}
               onClose={() => setPreviewOpen(false)}
               onToggleExpand={() => setPreviewExpanded((e) => !e)}
+              onOpenBrowserFullscreen={() => setBrowserFullscreenOpen(true)}
             />
           )}
         </Box>
@@ -208,6 +212,17 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
           />
         )}
       </Box>
+
+      {list.activeChat && (
+        <BrowserFullscreenModal
+          opened={browserFullscreenOpen}
+          chatId={list.activeChat}
+          title={activeChatData?.title}
+          inputDisabled={inputDisabled}
+          onSend={stream.sendMessage}
+          onClose={() => setBrowserFullscreenOpen(false)}
+        />
+      )}
     </Box>
   );
 }
