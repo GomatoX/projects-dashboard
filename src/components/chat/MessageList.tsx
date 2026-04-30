@@ -11,7 +11,7 @@
 'use client';
 
 import { useCallback, useRef, useState, type ReactNode } from 'react';
-import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
+import { Virtuoso } from 'react-virtuoso';
 import { Box, Button, ActionIcon, Center, Stack, Text } from '@mantine/core';
 import { IconSparkles, IconArrowDown, IconPlus } from '@tabler/icons-react';
 import { ChatMessage, type ChatMsg } from './ChatMessage';
@@ -31,13 +31,24 @@ export function MessageList({
   renderStreamingBubble,
   onCreate,
 }: MessageListProps) {
-  const virtuosoRef = useRef<VirtuosoHandle>(null);
+  // Capture the underlying scroller element so the jump-pill can scroll past
+  // the Footer (where the streaming bubble lives). `virtuosoRef.scrollToIndex`
+  // only reaches the last DATA row, which would land the user above the
+  // streaming text — exactly the opposite of the affordance the pill exists
+  // for. Native `scrollTo({ top: scrollHeight })` reaches the absolute bottom.
+  const scrollerRef = useRef<HTMLElement | null>(null);
   const [atBottom, setAtBottom] = useState(true);
 
   const Footer = useCallback(
     () => <Box>{renderStreamingBubble()}</Box>,
     [renderStreamingBubble],
   );
+
+  const jumpToBottom = () => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+  };
 
   if (!activeChat) {
     return (
@@ -77,15 +88,22 @@ export function MessageList({
   return (
     <Box style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex' }}>
       <Virtuoso
-        ref={virtuosoRef}
+        // Re-mount the virtualized list when the user switches chats. Without
+        // this key, virtuoso reuses one instance and bleeds the previous
+        // chat's scroll position into the new chat's first paint.
+        key={activeChat}
+        scrollerRef={(el) => {
+          scrollerRef.current = el as HTMLElement | null;
+        }}
         style={{ flex: 1 }}
         data={messages}
-        // Reset when the chat switches — virtuoso uses this as a key.
-        // (`computeItemKey` ensures stable per-row keys within a chat.)
         computeItemKey={(_, msg) => msg.id}
         itemContent={(_, msg) => <ChatMessage message={msg} />}
         components={{ Footer }}
-        // Stick-to-bottom: smooth scroll new content while user is at end.
+        // Stick-to-bottom while at end. `followOutput` triggers on data-length
+        // change; mid-stream Footer growth is handled by virtuoso's internal
+        // SIZE_INCREASED auto-scroll (kicks in when the user is glued to
+        // bottom). The "Writing" pill below covers the scrolled-up case.
         followOutput="smooth"
         atBottomStateChange={setAtBottom}
         atBottomThreshold={50}
@@ -94,13 +112,7 @@ export function MessageList({
       {!atBottom &&
         (showsLiveTurn ? (
           <Button
-            onClick={() =>
-              virtuosoRef.current?.scrollToIndex({
-                index: 'LAST',
-                align: 'end',
-                behavior: 'smooth',
-              })
-            }
+            onClick={jumpToBottom}
             size="compact-xs"
             radius="xl"
             variant="filled"
@@ -120,13 +132,7 @@ export function MessageList({
           </Button>
         ) : (
           <ActionIcon
-            onClick={() =>
-              virtuosoRef.current?.scrollToIndex({
-                index: 'LAST',
-                align: 'end',
-                behavior: 'smooth',
-              })
-            }
+            onClick={jumpToBottom}
             radius="xl"
             size="sm"
             variant="filled"
