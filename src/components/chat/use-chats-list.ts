@@ -6,7 +6,10 @@ import { MODEL_OPTIONS } from './ChatHeader';
 import {
   hasPreview as hasPreviewInStore,
   writePreview as writePreviewToStore,
+  clearPreview,
 } from './preview-store';
+import { clear as clearStreamingState } from './streaming-store';
+import { clearChat as clearBrowserFrames } from '@/lib/ai/browser-frame-store';
 import { EMPTY_PREVIEW_STATE, type PreviewState } from '@/lib/ai/preview-types';
 import { extractAllPreviews } from '@/lib/ai/preview-detector';
 import { mergePreviewItem } from '@/lib/ai/preview-merge';
@@ -191,6 +194,13 @@ export function useChatsList(projectId: string, defaultModel: string) {
       await fetch(`/api/projects/${projectId}/chat/${chatId}`, {
         method: 'DELETE',
       });
+      // Drop per-chat client-side state so deleted chats don't linger in memory.
+      // Browser frames would otherwise persist until the agent emits
+      // BROWSER_CONTEXT_CLOSED (idle TTL); streaming/preview slices would persist
+      // until process restart. Bounded but worth cleaning up at the obvious moment.
+      clearBrowserFrames(chatId);
+      clearStreamingState(chatId);
+      clearPreview(chatId);
       const updated = chatList.filter((c) => c.id !== chatId);
       setChatList(updated);
       if (activeChat === chatId) {
