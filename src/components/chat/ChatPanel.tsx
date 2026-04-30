@@ -5,7 +5,6 @@ import { useStreamingState } from './streaming-state';
 import { useChatStreamSlice } from './streaming-store';
 import {
   hasPreview as hasPreviewInStore,
-  usePreviewSlice,
   writePreview as writePreviewToStore,
 } from './preview-store';
 import {
@@ -44,9 +43,7 @@ interface UploadedAttachment {
 import { ChatHeader, MODEL_OPTIONS } from './ChatHeader';
 import { type PermissionRequest, type ToolActivity } from './ToolApprovalCard';
 import { StreamingBubble } from './StreamingBubble';
-import { PreviewPanel } from './PreviewPanel';
-import { PreviewRail } from './PreviewRail';
-import { ResizeHandle } from './ResizeHandle';
+import { PreviewHost, PreviewRailHost } from './PreviewHost';
 import {
   EMPTY_PREVIEW_STATE,
   type PreviewState,
@@ -54,7 +51,6 @@ import {
 import { extractAllPreviews } from '@/lib/ai/preview-detector';
 import { mergePreviewItem } from '@/lib/ai/preview-merge';
 import { pushFrame, clearChat as clearBrowserFrames } from '@/lib/ai/browser-frame-store';
-import { useLocalStorage } from '@mantine/hooks';
 
 interface Chat {
   id: string;
@@ -141,32 +137,6 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewExpanded, setPreviewExpanded] = useState(false);
 
-  // Persisted chat/preview split — value is the panel-area percentage of the
-  // outer flex row (i.e. chat column gets 100 - split%). Clamped on read so a
-  // stale localStorage value (e.g. set before clamps existed) can't break the
-  // layout.
-  const [splitPercentRaw, setSplitPercentRaw] = useLocalStorage<number>({
-    key: 'chat:previewSplitPercent',
-    defaultValue: 50,
-  });
-  // Defensive: if localStorage holds a corrupted/non-finite value, fall back
-  // to 50 instead of letting NaN propagate into `flexBasis: NaN%`.
-  const splitPercent = Math.min(
-    80,
-    Math.max(20, Number.isFinite(splitPercentRaw) ? splitPercentRaw : 50),
-  );
-  const setSplitPercent = useCallback(
-    (next: number) => {
-      const safe = Number.isFinite(next) ? next : 50;
-      setSplitPercentRaw(Math.min(80, Math.max(20, safe)));
-    },
-    [setSplitPercentRaw],
-  );
-
-  const previewState = usePreviewSlice(activeChat);
-  const activeItem = previewState.items.find((i) => i.id === previewState.activeId) ?? null;
-  const hasItems = previewState.items.length > 0;
-
   // Shared dispatcher for the three BROWSER_* events emitted by the agent's
   // browser MCP. Returns true when the event was handled (so the caller can
   // early-return and skip the rest of its event-handler chain).
@@ -230,11 +200,6 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
   }, [activeChat]);
 
   const containerRef = useRef<HTMLDivElement>(null);
-  // True only while the user is actively dragging the resize handle. Used to
-  // disable the preview panel's flex-basis transition during drag — otherwise
-  // every mousemove triggers a fresh 200ms animation and the handle "wobbles"
-  // behind the cursor.
-  const [isResizing, setIsResizing] = useState(false);
 
   const streaming = useStreamingState();
   // Subscribed read of the active chat's slice. Re-renders the panel ONLY
@@ -1263,58 +1228,22 @@ export function ChatPanel({ projectId, deviceId, deviceConnected }: ChatPanelPro
         )}
       </Box>
 
-      {/* Preview dock: rail is always visible whenever any preview exists for
-          this chat; resize handle + panel content are conditional on previewOpen. */}
-      {hasItems && previewOpen && activeItem && (
-        <>
-          <ResizeHandle
-            onResize={setSplitPercent}
+        {activeChat && (
+          <PreviewHost
+            chatId={activeChat}
             containerRef={containerRef}
-            onDragStart={() => setIsResizing(true)}
-            onDragEnd={() => setIsResizing(false)}
+            open={previewOpen}
+            expanded={previewExpanded}
+            onClose={() => setPreviewOpen(false)}
+            onToggleExpand={() => setPreviewExpanded((e) => !e)}
           />
-          <Box
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              flexGrow: 0,
-              flexShrink: 0,
-              flexBasis: `${previewExpanded ? Math.max(splitPercent, 66) : splitPercent}%`,
-              minWidth: 280,
-              height: '100%',
-              minHeight: 0,
-              borderLeft: '1px solid var(--mantine-color-dark-6)',
-              background: 'var(--mantine-color-dark-7)',
-              // Disable easing while the user is actively dragging — otherwise
-              // each mousemove kicks off a new 200ms animation and the handle
-              // visibly lags / wobbles behind the cursor.
-              transition: isResizing
-                ? 'none'
-                : 'flex-basis 200ms cubic-bezier(0.4, 0, 0.2, 1)',
-              overflow: 'hidden',
-            }}
-          >
-            <PreviewPanel
-              key={activeItem.id}
-              item={activeItem}
-              chatId={activeChat!}
-              isExpanded={previewExpanded}
-              onClosePanel={() => setPreviewOpen(false)}
-              onToggleExpand={() => setPreviewExpanded((e) => !e)}
-            />
-          </Box>
-        </>
-      )}
+        )}
       </Box>
-      {hasItems && activeChat && (
-        <PreviewRail
-          items={previewState.items}
-          activeId={previewState.activeId}
+      {activeChat && (
+        <PreviewRailHost
+          chatId={activeChat}
           panelOpen={previewOpen}
-          onSelect={(id) => {
-            writePreviewToStore(activeChat, (prev) => ({ ...prev, activeId: id }));
-            setPreviewOpen(true);
-          }}
+          onSelect={() => setPreviewOpen(true)}
           onTogglePanel={() => setPreviewOpen((o) => !o)}
         />
       )}
