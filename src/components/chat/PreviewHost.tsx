@@ -22,6 +22,9 @@ interface PreviewHostProps {
   expanded: boolean;
   onClose: () => void;
   onToggleExpand: () => void;
+  onOpenBrowserFullscreen?: () => void;
+  onOpenBrowserPopout?: () => void;
+  browserPoppedOut?: boolean;
 }
 
 export function PreviewHost({
@@ -31,6 +34,9 @@ export function PreviewHost({
   expanded,
   onClose,
   onToggleExpand,
+  onOpenBrowserFullscreen,
+  onOpenBrowserPopout,
+  browserPoppedOut,
 }: PreviewHostProps) {
   const previewState = usePreviewSlice(chatId);
   const activeItem = previewState.items.find((i) => i.id === previewState.activeId) ?? null;
@@ -89,6 +95,9 @@ export function PreviewHost({
           isExpanded={expanded}
           onClosePanel={onClose}
           onToggleExpand={onToggleExpand}
+          onOpenBrowserFullscreen={onOpenBrowserFullscreen}
+          onOpenBrowserPopout={onOpenBrowserPopout}
+          browserPoppedOut={browserPoppedOut}
         />
       </Box>
     </>

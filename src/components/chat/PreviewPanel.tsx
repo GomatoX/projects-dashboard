@@ -4,6 +4,8 @@ import { ActionIcon, Box, Group, Text, Tooltip } from '@mantine/core';
 import {
   IconArrowsDiagonal,
   IconArrowsDiagonalMinimize2,
+  IconExternalLink,
+  IconMaximize,
   IconX,
 } from '@tabler/icons-react';
 import { type PreviewItem } from '@/lib/ai/preview-types';
@@ -21,6 +23,13 @@ interface PreviewPanelProps {
   /** Close the entire panel (rail stays visible if items.length > 0). */
   onClosePanel: () => void;
   onToggleExpand: () => void;
+  /** Browser-only: open the in-page fullscreen modal. */
+  onOpenBrowserFullscreen?: () => void;
+  /** Browser-only: pop the browser preview out into a separate window. */
+  onOpenBrowserPopout?: () => void;
+  /** Browser-only: when true, renders the "popped out" placeholder
+   *  instead of <BrowserPreview>. */
+  browserPoppedOut?: boolean;
 }
 
 const CONTENT_TYPE_LABELS: Record<string, string> = {
@@ -38,6 +47,9 @@ export function PreviewPanel({
   isExpanded,
   onClosePanel,
   onToggleExpand,
+  onOpenBrowserFullscreen,
+  onOpenBrowserPopout,
+  browserPoppedOut,
 }: PreviewPanelProps) {
   return (
     <Box
@@ -88,6 +100,38 @@ export function PreviewPanel({
         </Group>
 
         <Group gap={2} wrap="nowrap" style={{ flexShrink: 0 }}>
+          {item.contentType === 'browser' && onOpenBrowserFullscreen && (
+            <Tooltip label="Fullscreen browser" withArrow>
+              <ActionIcon
+                variant="subtle"
+                size="sm"
+                color="gray"
+                onClick={onOpenBrowserFullscreen}
+                aria-label="Fullscreen browser"
+              >
+                <IconMaximize size={14} />
+              </ActionIcon>
+            </Tooltip>
+          )}
+          {item.contentType === 'browser' && onOpenBrowserPopout && (
+            <Tooltip
+              label={browserPoppedOut ? 'Browser is in another window' : 'Open in new window'}
+              withArrow
+            >
+              <ActionIcon
+                variant="subtle"
+                size="sm"
+                color={browserPoppedOut ? 'brand' : 'gray'}
+                onClick={onOpenBrowserPopout}
+                aria-label={
+                  browserPoppedOut ? 'Browser is in another window' : 'Open in new window'
+                }
+                aria-pressed={browserPoppedOut}
+              >
+                <IconExternalLink size={14} />
+              </ActionIcon>
+            </Tooltip>
+          )}
           <Tooltip
             label={isExpanded ? 'Collapse preview' : 'Expand preview'}
             withArrow
@@ -135,8 +179,48 @@ export function PreviewPanel({
         )}
         {item.contentType === 'svg' && <SvgPreview content={item.content} />}
         {item.contentType === 'diff' && <DiffPreview content={item.content} />}
-        {item.contentType === 'browser' && <BrowserPreview chatId={chatId} />}
+        {item.contentType === 'browser' &&
+          (browserPoppedOut ? (
+            <BrowserPoppedOutPlaceholder onFocus={onOpenBrowserPopout} />
+          ) : (
+            <BrowserPreview chatId={chatId} />
+          ))}
       </Box>
+    </Box>
+  );
+}
+
+function BrowserPoppedOutPlaceholder({ onFocus }: { onFocus?: () => void }) {
+  return (
+    <Box
+      style={{
+        height: '100%',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexDirection: 'column',
+        gap: 12,
+        padding: 24,
+        textAlign: 'center',
+      }}
+    >
+      <Text size="sm" c="dimmed">
+        Browser preview is in a separate window.
+      </Text>
+      {onFocus && (
+        <ActionIcon
+          variant="light"
+          size="lg"
+          color="brand"
+          onClick={onFocus}
+          aria-label="Focus popped-out browser window"
+        >
+          <IconExternalLink size={16} />
+        </ActionIcon>
+      )}
+      <Text size="xs" c="dimmed">
+        Close that window to bring the browser back here.
+      </Text>
     </Box>
   );
 }
