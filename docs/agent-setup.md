@@ -62,19 +62,41 @@ Modalas automatiškai aptiks prisijungimą ir parodys discover'intus projektus.
 5. nutrins seną kodą **paliekant** `.env`, `node_modules`, `agent.log`,
 6. paleis servisą atgal ir parodys naują versiją `vX.Y.Z → vA.B.C`.
 
-### Du būdai update'inti
+### Trys būdai update'inti
 
-**A) Per dashboard UI** — atidaryk Add Device modalą tam pačiam device'ui (arba kopijuok istorinę komandą) ir paleisk antrą kartą. Token'as gali būti tas pats (jis hash'e nesikeičia kol nepasibaigia jo TTL).
+**A) Per dashboard mygtuką** *(v0.6.0+, rekomenduojama)* — vienu paspaudimu, jokio terminalo
 
-> **Patarimas:** jei senasis token'as nebegalioja arba pamiršai, sugeneruok naują per **Devices → [device row] → Rotate Token**. Tas pats `curl` su nauju token'u perrašys `.env`.
+Devices puslapyje kiekviename device card'e yra ↻ Update mygtukas. Paspaudus ir patvirtinus modalą:
 
-**B) Tiesiog ant device'o** *(rekomenduojama kasdieniam naudojimui)*:
+1. Dashboard'as siunčia `RUN_SELF_UPDATE` socket žinutę į agentą.
+2. Agentas atspausdina dabartinę versiją, paleidžia detached bash helper'į `/tmp/...`, ir `process.exit(0)`.
+3. systemd / launchd respawn'ina agentą ant **seno** kodo (~5s gap iš `RestartSec=5`).
+4. Helper script — jau nepriklausomas nuo agento — parsisiunčia tarball'ą, išskleidžia, paleidžia `pnpm install`, sukopijuoja failus į `~/.dev-dashboard-agent/` (paliekant `.env`, log'us, browser session state).
+5. Helper'is `pkill`'ina ką tik respawn'intą agentą — kitas service manager restart'as paima **naują** kodą.
+
+**Niekur sudo nereikalingas.** Visas update'as vyksta su tuo pačiu user'iu, kuris paleidžia agentą.
+
+> **Mygtukas dim'intas, kai device offline** — tooltip parodo priežastį.
+
+**Klaidos atveju** (download fail'ino, `pnpm install` lūžo, ir t.t.) helper'is pasilieka log'us `~/.dev-dashboard-agent/self-update.log`. Agent'as tiesiog grįžta ant senos versijos kito reconnect'o metu — UI vis tiek rodo „online", o tu gali pažiūrėti kas nutiko:
+
+```bash
+tail -n 100 ~/.dev-dashboard-agent/self-update.log
+```
+
+**B) Tiesiog ant device'o** *(geriausia kai dashboard nepasiekiamas arba reikia rankinio control'io)*:
 
 ```bash
 bash ~/.dev-dashboard-agent/update.sh
 ```
 
 `update.sh` perskaito esamą `.env`, paima `DASHBOARD_URL` ir `AGENT_TOKEN` iš jo, ir paleidžia tą patį `curl ... | bash -s -- ...`. Jokių argumentų nereikia.
+
+**C) Per dashboard UI re-install** — atidaryk Add Device modalą tam pačiam device'ui (arba kopijuok istorinę komandą) ir paleisk antrą kartą. Token'as gali būti tas pats (jis hash'e nesikeičia kol nepasibaigia jo TTL).
+
+> **Patarimas:** jei senasis token'as nebegalioja arba pamiršai, sugeneruok naują per **Devices → [device row] → Rotate Token**. Tas pats `curl` su nauju token'u perrašys `.env`.
+
+> **Pirmasis upgrade'as iki v0.6.0:** jei ant device'o dabar yra senesnė versija (≤ v0.5.0), Option A neveiks (agent'as nemoka `RUN_SELF_UPDATE` komandos). Naudok B arba C vieną kartą — nuo v0.6.0+ dashboard mygtukas jau veiks.
 
 ### Patikrinimas, kad nauja versija paleido
 
@@ -196,6 +218,16 @@ Agent'o konfigas — `~/.dev-dashboard-agent/.env`:
    ```bash
    curl -v $DASHBOARD_URL/api/health
    ```
+
+### Dashboard'o ↻ Update mygtukas grąžina klaidą
+
+| Klaida UI / log'e | Priežastis | Sprendimas |
+|---|---|---|
+| Mygtukas dim'intas (disabled) | Device offline | Patikrink, ar agentas paleistas; pataisyk connection prieš bandant update'inti |
+| `Unknown command type: RUN_SELF_UPDATE` | Agento versija < v0.6.0 (nemoka šios komandos) | Vieną kartą paleisk Option B arba C; po to dashboard mygtukas veiks |
+| `Update timed out` toast'as (504) | Agentas neatsakė per 10s (gali būti slow disk / network) | Pažiūrėk `~/.dev-dashboard-agent/agent.log` — jei spawn'inosi helper'is, update jau gali vykti fone, tiesiog UI nepagavo |
+| `Refusing to update (no package.json …)` | Install dir sugadintas | Reinstall'ink iš naujo per Option C (curl) |
+| Update'as „pavyko" UI'e, bet agentas vis dar ant senos versijos | `pnpm install` lūžo helper'yje | `tail -f ~/.dev-dashboard-agent/self-update.log` parodys, kas nutiko |
 
 ### Sena versija nepasimato (banner rodo `v0.1.0`)
 
