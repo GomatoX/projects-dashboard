@@ -32,6 +32,7 @@ import {
   IconDeviceDesktop,
   IconShieldCheck,
   IconDownload,
+  IconRefresh,
 } from '@tabler/icons-react';
 import Link from 'next/link';
 
@@ -401,6 +402,135 @@ systemctl --user disable --now dev-dashboard-agent
 rm -rf ~/.dev-dashboard-agent
 rm ~/.config/systemd/user/dev-dashboard-agent.service`}
             />
+          </Stack>
+        </Card>
+
+        {/* Updating */}
+        <Card>
+          <Stack gap="md">
+            <Group gap="sm">
+              <IconRefresh size={20} style={{ opacity: 0.6 }} />
+              <Text size="sm" fw={600} tt="uppercase" c="dimmed">
+                Updating an Agent
+              </Text>
+            </Group>
+
+            <Text size="sm">
+              Agents bundle their version in a startup banner (e.g.{' '}
+              <Code>v0.6.0</Code>). When you change agent code in this repo
+              the dashboard rebuilds the tarball on the fly — every device
+              just needs to pull and restart.
+            </Text>
+
+            <Alert
+              icon={<IconInfoCircle size={16} />}
+              color="brand"
+              variant="light"
+              title="Three ways to update"
+            >
+              <List size="sm" spacing={4} mt={4}>
+                <List.Item>
+                  <b>Dashboard button</b> — one click, no terminal. Requires
+                  agent <Code>v0.6.0</Code> or newer.
+                </List.Item>
+                <List.Item>
+                  <b>Bundled <Code>update.sh</Code></b> — one command on the
+                  device, works on any version that was installed via the
+                  curl script.
+                </List.Item>
+                <List.Item>
+                  <b>Re-run install command</b> — the original curl line is
+                  also an idempotent updater.
+                </List.Item>
+              </List>
+            </Alert>
+
+            <Divider label="Option A — From the dashboard (recommended)" labelPosition="left" />
+            <Text size="sm">
+              Open the{' '}
+              <Text component={Link} href="/devices" c="brand" fw={500} inherit>
+                Devices page
+              </Text>
+              , click the{' '}
+              <Code>
+                <Group gap={4} display="inline-flex" style={{ verticalAlign: 'middle' }}>
+                  <IconRefresh size={12} /> Update
+                </Group>
+              </Code>{' '}
+              icon on a device card, and confirm. The dashboard sends a{' '}
+              <Code>RUN_SELF_UPDATE</Code> message over the existing socket;
+              the agent spawns a detached helper that downloads the latest
+              tarball, extracts it over the install dir, and lets the service
+              manager respawn the agent on the new code.
+            </Text>
+            <List size="sm" spacing={4}>
+              <List.Item>
+                <b>Preserves</b> <Code>.env</Code>, logs, and browser session
+                state under <Code>~/.dev-dashboard-agent</Code>.
+              </List.Item>
+              <List.Item>
+                <b>No sudo.</b> Runs entirely as the install user — relies on
+                systemd <Code>Restart=always</Code> / launchd{' '}
+                <Code>KeepAlive</Code> to bring the agent back.
+              </List.Item>
+              <List.Item>
+                <b>Disabled when offline.</b> If a device isn&apos;t connected,
+                the button is grayed out and the tooltip explains why.
+              </List.Item>
+              <List.Item>
+                <b>Helper logs</b> land in{' '}
+                <Code>~/.dev-dashboard-agent/self-update.log</Code> on the
+                device if anything goes wrong (failed download, broken{' '}
+                <Code>pnpm install</Code>, etc.). The agent comes back on the
+                old code so you don&apos;t lose connectivity.
+              </List.Item>
+            </List>
+
+            <Divider label="Option B — Bundled update.sh" labelPosition="left" />
+            <Text size="sm">
+              The original install script drops <Code>update.sh</Code> next
+              to the agent. It reads the existing <Code>.env</Code> (so you
+              don&apos;t need to re-pass <Code>DASHBOARD_URL</Code> or token),
+              re-downloads the tarball, and restarts the service.
+            </Text>
+            <CopyBlock
+              label="On the device"
+              code={`bash ~/.dev-dashboard-agent/update.sh`}
+            />
+
+            <Divider label="Option C — Re-run the install command" labelPosition="left" />
+            <Text size="sm">
+              The same <Code>curl … | bash</Code> from initial setup also
+              works as an update — it detects an existing install and prints{' '}
+              <Code>Mode: UPDATE (current vX.Y.Z)</Code>. Useful if the
+              device&apos;s <Code>update.sh</Code> is missing or stale.
+            </Text>
+            <CopyBlock
+              label="macOS"
+              code={`curl -fsSL ${dashboardUrl}/install/mac | bash -s -- \\
+  ${dashboardUrl} \\
+  YOUR_TOKEN_HERE`}
+            />
+            <CopyBlock
+              label="Linux"
+              code={`curl -fsSL ${dashboardUrl}/install/linux | bash -s -- \\
+  ${dashboardUrl} \\
+  YOUR_TOKEN_HERE`}
+            />
+
+            <Divider label="Verifying the new version" labelPosition="left" />
+            <Text size="sm">
+              After any update method, confirm the banner version in the
+              agent log — the first line after a restart looks like:
+            </Text>
+            <CopyBlock
+              code={`[agent] Dev Dashboard Agent v0.6.0 starting…`}
+            />
+            <Text size="xs" c="dimmed">
+              On macOS: <Code>tail -f ~/.dev-dashboard-agent/agent.log</Code>.
+              On Linux:{' '}
+              <Code>journalctl --user -u dev-dashboard-agent -f</Code>.
+            </Text>
           </Stack>
         </Card>
       </Stack>
