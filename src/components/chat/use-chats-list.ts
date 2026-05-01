@@ -182,6 +182,12 @@ export function useChatsList(projectId: string, defaultModel: string) {
   // Switch chat
   const switchChat = async (chatId: string) => {
     setActiveChat(chatId);
+    // Clear messages eagerly so MessageList's empty-state guard unmounts
+    // Virtuoso. When `fetchMessages` resolves, Virtuoso remounts with the
+    // correct `initialTopMostItemIndex` and lands at the bottom. Without this,
+    // Virtuoso would remount with the previous chat's stale messages and
+    // freeze the initial scroll position to that stale length.
+    setMessages([]);
     const chat = chatList.find((c) => c.id === chatId);
     if (chat?.model) {
       setSelectedModel(chat.model);
@@ -208,6 +214,10 @@ export function useChatsList(projectId: string, defaultModel: string) {
       if (activeChat === chatId) {
         if (updated.length > 0) {
           setActiveChat(updated[0].id);
+          // Same rationale as `switchChat`: clear before fetching so Virtuoso
+          // remounts at the bottom of the new chat instead of inheriting the
+          // deleted chat's scroll/length.
+          setMessages([]);
           await fetchMessages(updated[0].id);
         } else {
           setActiveChat(null);

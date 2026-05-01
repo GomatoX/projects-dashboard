@@ -128,6 +128,20 @@ export function MessageList({
         computeItemKey={(_, msg) => msg.id}
         itemContent={(_, msg) => <ChatMessage message={msg} />}
         components={components}
+        // Open at the bottom on mount. `followOutput` only triggers on
+        // post-mount appends, so without this prop Virtuoso lands at the top
+        // for any chat with enough history to scroll — exactly the bug the
+        // canonical chat pattern (https://virtuoso.dev/stick-to-bottom/) fixes
+        // with `initialTopMostItemIndex`. We pass `align: 'end'` so the BOTTOM
+        // of the last message lines up with the bottom of the viewport — the
+        // default `align: 'start'` would put the TOP of the last item at the
+        // top of the viewport, leaving the rest of it (and any empty space
+        // after) below the fold and looking like the chat opened mid-history.
+        // The empty-state guard above ensures we only reach this branch with
+        // either real messages or a live turn, so a 0 fallback is safe.
+        initialTopMostItemIndex={
+          messages.length > 0 ? { index: messages.length - 1, align: 'end' } : 0
+        }
         // Stick-to-bottom while at end. `followOutput` triggers on data-length
         // change; mid-stream Footer growth is handled by virtuoso's internal
         // SIZE_INCREASED auto-scroll (kicks in when the user is glued to
