@@ -28,9 +28,11 @@ import {
   IconChevronUp,
   IconRefresh,
   IconLoader2,
+  IconKey,
 } from '@tabler/icons-react';
 import type { SystemStats } from '@/lib/socket/types';
 import { notify } from '@/lib/notify';
+import { ReinstallCommandModal } from './ReinstallCommandModal';
 import classes from './DeviceCard.module.css';
 
 interface DeviceCardProps {
@@ -82,6 +84,10 @@ export function DeviceCard({
   // here — the agent reconnects with a new banner version, which the
   // device list polls and surfaces via lastSeen / status changes.
   const [updating, setUpdating] = useState(false);
+  // Controls the "Show install command" modal (rotates token + displays the
+  // curl one-liner). Opens unconditionally regardless of online state — the
+  // primary use case is "I lost the command and need to reinstall".
+  const [reinstallOpen, setReinstallOpen] = useState(false);
   const OsIcon = osIcons[os] || IconServer;
   const parsedCapabilities: string[] = (() => {
     try {
@@ -212,6 +218,17 @@ export function DeviceCard({
                   {updating ? <IconLoader2 size={14} /> : <IconRefresh size={14} />}
                 </ActionIcon>
               </span>
+            </Tooltip>
+            <Tooltip label="Show install command">
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                size="sm"
+                onClick={() => setReinstallOpen(true)}
+                aria-label={`Show install command for ${name}`}
+              >
+                <IconKey size={14} />
+              </ActionIcon>
             </Tooltip>
             <ActionIcon
               variant="subtle"
@@ -358,6 +375,15 @@ export function DeviceCard({
           </Group>
         )}
       </Stack>
+
+      <ReinstallCommandModal
+        opened={reinstallOpen}
+        onClose={() => setReinstallOpen(false)}
+        deviceId={id}
+        deviceName={name}
+        os={os}
+        isConnected={isOnline}
+      />
     </Card>
   );
 }

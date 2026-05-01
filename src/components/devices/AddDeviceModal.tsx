@@ -10,24 +10,16 @@ import {
   Code,
   Group,
   Text,
-  CopyButton,
-  ActionIcon,
-  Tooltip,
   Paper,
   Loader,
   Badge,
   ThemeIcon,
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
-import {
-  IconPlus,
-  IconCopy,
-  IconCheck,
-  IconTerminal2,
-  IconCircleCheck,
-} from '@tabler/icons-react';
+import { IconPlus, IconCircleCheck } from '@tabler/icons-react';
 import { DEVICE_OS } from '@/lib/constants';
 import type { DiscoveredProject } from '@/lib/socket/types';
+import { InstallCommand } from './InstallCommand';
 
 interface AddDeviceModalProps {
   opened: boolean;
@@ -143,17 +135,6 @@ export function AddDeviceModal({
     onClose();
   };
 
-  const dashboardUrl =
-    typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
-  const installScript =
-    tokenData?.os === 'darwin'
-      ? `curl -fsSL ${dashboardUrl}/install/mac | bash -s -- \\
-  ${dashboardUrl} \\
-  ${tokenData?.rawToken}`
-      : `curl -fsSL ${dashboardUrl}/install/linux | bash -s -- \\
-  ${dashboardUrl} \\
-  ${tokenData?.rawToken}`;
-
   return (
     <Modal
       opened={opened}
@@ -196,75 +177,13 @@ export function AddDeviceModal({
         </form>
       ) : step === 'token' ? (
         <Stack gap="lg">
-          <Text size="sm" c="dimmed">
-            Run this command on <b>{tokenData?.name}</b> to install the agent:
-          </Text>
-
-          <Paper
-            p="md"
-            radius="md"
-            style={{
-              backgroundColor: 'var(--mantine-color-dark-9)',
-              border: '1px solid var(--mantine-color-dark-5)',
-              position: 'relative',
-            }}
-          >
-            <Group justify="space-between" align="flex-start">
-              <Group gap="xs" mb="xs">
-                <IconTerminal2 size={14} style={{ opacity: 0.5 }} />
-                <Text size="xs" c="dimmed">
-                  Terminal
-                </Text>
-              </Group>
-              <CopyButton value={installScript}>
-                {({ copied, copy }) => (
-                  <Tooltip label={copied ? 'Copied!' : 'Copy command'}>
-                    <ActionIcon
-                      variant="subtle"
-                      color={copied ? 'teal' : 'gray'}
-                      onClick={copy}
-                      size="sm"
-                    >
-                      {copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
-                    </ActionIcon>
-                  </Tooltip>
-                )}
-              </CopyButton>
-            </Group>
-            <Code
-              block
-              style={{
-                backgroundColor: 'transparent',
-                fontSize: '13px',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-all',
-              }}
-            >
-              {installScript}
-            </Code>
-          </Paper>
-
-          <Text size="xs" c="dimmed">
-            Or run the agent manually for testing:
-          </Text>
-          <Paper
-            p="sm"
-            radius="md"
-            style={{
-              backgroundColor: 'var(--mantine-color-dark-9)',
-              border: '1px solid var(--mantine-color-dark-5)',
-            }}
-          >
-            <Code
-              block
-              style={{ backgroundColor: 'transparent', fontSize: '12px' }}
-            >{`cd agent && cp .env.example .env
-# Edit .env with your token
-DASHBOARD_URL=${dashboardUrl}
-AGENT_TOKEN=${tokenData?.rawToken}
-
-pnpm install && pnpm dev`}</Code>
-          </Paper>
+          {tokenData && (
+            <InstallCommand
+              rawToken={tokenData.rawToken}
+              os={tokenData.os}
+              deviceName={tokenData.name}
+            />
+          )}
 
           <Group gap="xs">
             <Loader size="xs" color="brand" />
@@ -280,7 +199,8 @@ pnpm install && pnpm dev`}</Code>
           </Text>
 
           <Badge size="sm" variant="outline" color="yellow">
-            Token expires in 10 minutes
+            Save this command — the dashboard does not store it. You can rotate it
+            later from the device card.
           </Badge>
         </Stack>
       ) : (
