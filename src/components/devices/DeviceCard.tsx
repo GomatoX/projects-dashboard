@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import {
   Card,
   Group,
@@ -14,6 +15,7 @@ import {
   Tooltip,
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
+import { modals } from '@mantine/modals';
 import {
   IconTrash,
   IconServer,
@@ -24,8 +26,11 @@ import {
   IconBattery3,
   IconChevronDown,
   IconChevronUp,
+  IconRefresh,
+  IconLoader2,
 } from '@tabler/icons-react';
 import type { SystemStats } from '@/lib/socket/types';
+import { notify } from '@/lib/notify';
 import classes from './DeviceCard.module.css';
 
 interface DeviceCardProps {
@@ -72,6 +77,11 @@ export function DeviceCard({
   onDelete,
 }: DeviceCardProps) {
   const [expanded, { toggle }] = useDisclosure(false);
+  // Tracks the in-flight POST /api/devices/:id/update so the button can
+  // show a spinner. We deliberately don't track post-restart progress
+  // here — the agent reconnects with a new banner version, which the
+  // device list polls and surfaces via lastSeen / status changes.
+  const [updating, setUpdating] = useState(false);
   const OsIcon = osIcons[os] || IconServer;
   const parsedCapabilities: string[] = (() => {
     try {
@@ -82,6 +92,51 @@ export function DeviceCard({
   })();
 
   const isOnline = status === 'online';
+
+  const handleUpdate = () => {
+    modals.openConfirmModal({
+      title: 'Update agent',
+      children: (
+        <Stack gap="xs">
+          <Text size="sm">
+            Trigger a remote self-update on <b>{name}</b>?
+          </Text>
+          <Text size="xs" c="dimmed">
+            The device will download the latest agent tarball, swap files in{' '}
+            <code>~/.dev-dashboard-agent</code>, and restart via its service manager. The
+            device will briefly show as offline while restarting (typically 5–10 seconds).
+          </Text>
+        </Stack>
+      ),
+      labels: { confirm: 'Update', cancel: 'Cancel' },
+      confirmProps: { color: 'blue', leftSection: <IconRefresh size={14} /> },
+      onConfirm: async () => {
+        setUpdating(true);
+        try {
+          const res = await fetch(`/api/devices/${id}/update`, { method: 'POST' });
+          const data = await res.json();
+          if (!res.ok) {
+            throw new Error(data?.error || `HTTP ${res.status}`);
+          }
+          notify({
+            color: 'teal',
+            title: 'Update started',
+            message: data.fromVersion
+              ? `Updating ${name} (v${data.fromVersion} → latest). Reconnects shortly.`
+              : `Updating ${name}. Reconnects shortly.`,
+          });
+        } catch (err) {
+          notify({
+            color: 'red',
+            title: 'Update failed',
+            message: err instanceof Error ? err.message : String(err),
+          });
+        } finally {
+          setUpdating(false);
+        }
+      },
+    });
+  };
 
   const formatLastSeen = (ts: string | null) => {
     if (!ts) return 'Never';
@@ -136,12 +191,35 @@ export function DeviceCard({
                 </ActionIcon>
               </Tooltip>
             )}
+            <Tooltip
+              label={isOnline ? 'Update agent' : 'Device offline — cannot update'}
+            >
+              {/*
+                Wrapping span so the Tooltip still works when the button
+                is disabled (Mantine forwards `disabled` to the underlying
+                button, which strips pointer events otherwise).
+              */}
+              <span>
+                <ActionIcon
+                  variant="subtle"
+                  color="blue"
+                  size="sm"
+                  onClick={handleUpdate}
+                  disabled={!isOnline || updating}
+                  loading={updating}
+                  aria-label={`Update ${name}`}
+                >
+                  {updating ? <IconLoader2 size={14} /> : <IconRefresh size={14} />}
+                </ActionIcon>
+              </span>
+            </Tooltip>
             <ActionIcon
               variant="subtle"
               color="red"
               size="sm"
               onClick={() => onDelete(id)}
               className={classes.deleteBtn}
+              aria-label={`Delete ${name}`}
             >
               <IconTrash size={14} />
             </ActionIcon>

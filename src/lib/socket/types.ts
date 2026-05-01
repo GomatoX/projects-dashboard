@@ -156,7 +156,19 @@ export type AgentCommand =
   // Used by the dashboard to repopulate the browser preview after a page
   // refresh (the live screencast only emits frames when the page renders
   // something new, so a static page would otherwise stay blank).
-  | { type: 'BROWSER_SNAPSHOT_REQUEST'; id: string; chatId: string };
+  | { type: 'BROWSER_SNAPSHOT_REQUEST'; id: string; chatId: string }
+
+  // ─── Self-update ───────────────────────────────────────
+  // Asks the agent to download the latest tarball from the dashboard,
+  // swap files, and restart itself via the OS service manager
+  // (systemd Restart=always on Linux, launchd KeepAlive on macOS).
+  //
+  // The agent emits SELF_UPDATE_STATUS events for progress, then exits
+  // cleanly. Reconnecting with a higher banner version is the dashboard's
+  // signal that the update succeeded — there is no synchronous "done"
+  // response because the process running this command is the one being
+  // replaced.
+  | { type: 'RUN_SELF_UPDATE'; id: string };
 
 // ─── Agent → Dashboard Events ─────────────────────────────
 export type AgentEvent =
@@ -322,6 +334,20 @@ export type AgentEvent =
        *  raised. Either way the dashboard should leave the panel in
        *  its "waiting for first frame" state. */
       error?: string;
+    }
+  | {
+      // Progress events for an in-flight self-update. Routed by
+      // `requestId` matching the originating RUN_SELF_UPDATE.id.
+      // The 'restarting' phase is the last event the dashboard will
+      // see from this process — the next signal of success is the
+      // agent reconnecting with a higher banner version string.
+      type: 'SELF_UPDATE_STATUS';
+      requestId: string;
+      phase: 'starting' | 'downloading' | 'installing' | 'restarting' | 'failed';
+      /** Human-readable detail (file path, error message, etc.). */
+      message?: string;
+      /** Current agent banner version, set on 'starting'. */
+      fromVersion?: string;
     };
 
 // ─── Response wrapper (for command → response flow) ───────

@@ -51,6 +51,7 @@ import {
   closeAll as closeAllBrowser,
   captureSnapshot as captureBrowserSnapshot,
 } from './mcp/browser/index.js';
+import { handleSelfUpdate } from './handlers/self-update.js';
 import type { AgentCommand, AgentEvent } from '../../src/lib/socket/types.js';
 
 // Bumped on every code change that touches the agent ↔ dashboard contract,
@@ -58,7 +59,7 @@ import type { AgentCommand, AgentEvent } from '../../src/lib/socket/types.js';
 // confirm the device is running the build that includes a given fix
 // (e.g. v0.2.0 = chat attachments are downloaded over HTTP instead of
 // surviving as `__ATTACHMENT_<index>__` placeholders).
-console.log('🔧 Dev Dashboard Agent v0.5.0 (browser snapshot-on-demand)');
+console.log('🔧 Dev Dashboard Agent v0.6.0 (remote self-update)');
 console.log('─'.repeat(40));
 
 const config = loadConfig();
@@ -339,6 +340,18 @@ const { socket } = createConnection(config, {
           command.requestId,
           command.decision,
         );
+        return;
+
+      case 'RUN_SELF_UPDATE':
+        // Fire-and-forget; the handler emits SELF_UPDATE_STATUS events
+        // and ultimately calls process.exit(0). Don't await — we want
+        // the command switch to return so the socket can flush the
+        // first status events before we exit.
+        void handleSelfUpdate({
+          socket,
+          requestId: command.id,
+          dashboardUrl: config.dashboardUrl,
+        });
         return;
 
       case 'BROWSER_SNAPSHOT_REQUEST': {

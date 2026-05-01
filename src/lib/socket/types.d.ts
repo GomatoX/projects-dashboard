@@ -202,6 +202,9 @@ export type AgentCommand = {
     type: 'BROWSER_SNAPSHOT_REQUEST';
     id: string;
     chatId: string;
+} | {
+    type: 'RUN_SELF_UPDATE';
+    id: string;
 };
 export type AgentEvent = {
     type: 'AGENT_HELLO';
@@ -392,6 +395,14 @@ export type AgentEvent = {
      *  raised. Either way the dashboard should leave the panel in
      *  its "waiting for first frame" state. */
     error?: string;
+} | {
+    type: 'SELF_UPDATE_STATUS';
+    requestId: string;
+    phase: 'starting' | 'downloading' | 'installing' | 'restarting' | 'failed';
+    /** Human-readable detail (file path, error message, etc.). */
+    message?: string;
+    /** Current agent banner version, set on 'starting'. */
+    fromVersion?: string;
 };
 export interface CommandResponse<T = unknown> {
     requestId: string;
